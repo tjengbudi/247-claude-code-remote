@@ -1,4 +1,5 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
+import { randomBytes } from 'crypto';
 import type {
   Machine,
   MachineConfig,
@@ -255,6 +256,42 @@ describe('Shared Types', () => {
 
       expect(config.machine.id).toBeDefined();
       expect(config.dashboard.apiUrl).toContain('http');
+    });
+
+    it('accepts dashboard.apiKey (agentAuthToken) — provisioned case', () => {
+      // Contract: dashboard.apiKey is the agentAuthToken (D7, Story 3.1).
+      // Derive the sample the documented way (randomBytes(32).toString('base64url'))
+      // so the URL-safe + length assertions exercise the real generation contract
+      // instead of a hand-typed literal.
+      const apiKey = randomBytes(32).toString('base64url');
+      const config: AgentConfig = {
+        machine: { id: 'machine-1', name: 'Test Machine' },
+        agent: { port: 4678, url: 'localhost:4678' },
+        projects: { basePath: '~/Dev', whitelist: [] },
+        dashboard: {
+          apiUrl: 'http://localhost:3001/api',
+          apiKey,
+        },
+      };
+      expect(config.dashboard.apiKey).toBeDefined();
+      // URL-safe base64 of 32 bytes is 43 chars and contains no +, /, or = characters
+      expect(config.dashboard.apiKey).not.toMatch(/[+/=]/);
+      expect(config.dashboard.apiKey).toHaveLength(43);
+    });
+
+    it('accepts AgentConfig without dashboard.apiKey — not-yet-provisioned / enforcement-OFF case', () => {
+      // Contract: dashboard.apiKey is optional (AC2, Story 3.1).
+      // A config legitimately lacks the token before `247 init` provisions it,
+      // or before a pre-existing agent_connection re-pairs during the enforcement-OFF rollout.
+      const config: AgentConfig = {
+        machine: { id: 'machine-1', name: 'Test Machine' },
+        agent: { port: 4678, url: 'localhost:4678' },
+        projects: { basePath: '~/Dev', whitelist: [] },
+        dashboard: { apiUrl: 'http://localhost:3001/api' },
+      };
+      expect(config.dashboard.apiUrl).toBeDefined();
+      expect(config.dashboard.apiKey).toBeUndefined();
+      expectTypeOf(config.dashboard.apiKey).toEqualTypeOf<string | undefined>();
     });
 
     it('allows optional agent and editor', () => {

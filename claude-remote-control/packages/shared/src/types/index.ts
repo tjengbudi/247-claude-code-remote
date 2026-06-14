@@ -155,6 +155,27 @@ export interface AgentConfig {
   };
   dashboard: {
     apiUrl: string;
-    apiKey: string;
+    /**
+     * **agentAuthToken** — persistent, single-principal bearer secret that
+     * authenticates the web dashboard *to* the agent (web → agent direction).
+     *
+     * `apiKey` is only the storage field name; the concept is **agentAuthToken**.
+     *
+     * - Provisioned once by `247 init` (URL-safe base64 via `randomBytes(32).toString('base64url')`).
+     * - The agent reads it at the WS upgrade handler; the web sends it as a
+     *   `Sec-WebSocket-Protocol` value (and as `Authorization: Bearer` for HTTP).
+     * - **URL-safe base64** (no `+`, `/`, or `=`) — mandatory because it is
+     *   transmitted as a WS subprotocol token.
+     *
+     * Optional — a config may legitimately lack the token before `247 init`
+     * provisions it, or before a pre-existing agent_connection re-pairs during
+     * the enforcement-OFF rollout window (Epic 3, G-9).
+     *
+     * Distinct from:
+     * - `pairingToken` — ephemeral HMAC used only during the pairing handshake
+     * - `WEB_AUTH_SECRET` — web session-signing env var (Epic 4), never in agent config
+     * - `machineId` — cross-system linking key (`machine.id`)
+     */
+    apiKey?: string;
   };
 }

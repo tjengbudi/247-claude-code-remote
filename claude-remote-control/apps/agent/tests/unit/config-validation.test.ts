@@ -29,7 +29,9 @@ function isValidAgentConfig(obj: unknown): obj is AgentConfig {
   if (typeof config.dashboard !== 'object' || config.dashboard === null) return false;
   const dashboard = config.dashboard as Record<string, unknown>;
   if (typeof dashboard.apiUrl !== 'string') return false;
-  if (typeof dashboard.apiKey !== 'string') return false;
+  // apiKey (agentAuthToken) is optional — a config may lack it before `247 init`
+  // provisions it or during the enforcement-OFF rollout (Story 3.1). If present, it must be a string.
+  if (dashboard.apiKey !== undefined && typeof dashboard.apiKey !== 'string') return false;
 
   // Optional: agent
   if (config.agent !== undefined) {
@@ -157,11 +159,21 @@ describe('AgentConfig Validation', () => {
         expect(isValidAgentConfig(config)).toBe(false);
       });
 
-      it('rejects config without dashboard.apiKey', () => {
+      it('accepts config without dashboard.apiKey (optional agentAuthToken — Story 3.1)', () => {
         const config = {
           machine: { id: 'machine-1', name: 'Test' },
           projects: { basePath: '~/Dev', whitelist: [] },
           dashboard: { apiUrl: 'http://localhost:3001/api' },
+        };
+
+        expect(isValidAgentConfig(config)).toBe(true);
+      });
+
+      it('rejects config with non-string dashboard.apiKey', () => {
+        const config = {
+          machine: { id: 'machine-1', name: 'Test' },
+          projects: { basePath: '~/Dev', whitelist: [] },
+          dashboard: { apiUrl: 'http://localhost:3001/api', apiKey: 123 },
         };
 
         expect(isValidAgentConfig(config)).toBe(false);
