@@ -7,12 +7,13 @@ import { Router } from 'express';
 import { createHmac } from 'crypto';
 import { config } from '../config.js';
 
-// In-memory store for pairing codes (6-digit codes with 10-minute expiry)
+// In-memory store for pairing codes (6-digit codes with 5-minute expiry)
 interface PairingCode {
   code: string;
   machineId: string;
   machineName: string;
   agentUrl: string;
+  token?: string;
   createdAt: number;
   expiresAt: number;
 }
@@ -114,15 +115,16 @@ export function createPairRoutes(): Router {
     const agentUrl = getAgentUrl();
     const dashboardUrl = getDashboardUrl();
 
-    // Create token (10 minute expiry)
+    // Create token (5 minute expiry)
     const token = createToken(
       {
         mid: machineId,
         mn: machineName,
         url: agentUrl,
+        tok: config.dashboard?.apiKey,
       },
       machineId,
-      10 * 60 * 1000
+      5 * 60 * 1000
     );
 
     // Generate or reuse existing code for this machine
@@ -143,8 +145,9 @@ export function createPairRoutes(): Router {
           machineId,
           machineName,
           agentUrl,
+          token: config.dashboard?.apiKey,
           createdAt: Date.now(),
-          expiresAt: Date.now() + 10 * 60 * 1000,
+          expiresAt: Date.now() + 5 * 60 * 1000,
         });
         return newCode;
       })();
@@ -345,15 +348,16 @@ export function createPairRoutes(): Router {
     const agentUrl = getAgentUrl();
     const dashboardUrl = getDashboardUrl();
 
-    // Create token (10 minute expiry)
+    // Create token (5 minute expiry)
     const token = createToken(
       {
         mid: machineId,
         mn: machineName,
         url: agentUrl,
+        tok: config.dashboard?.apiKey,
       },
       machineId,
-      10 * 60 * 1000
+      5 * 60 * 1000
     );
 
     // Generate or reuse existing code
@@ -374,8 +378,9 @@ export function createPairRoutes(): Router {
           machineId,
           machineName,
           agentUrl,
+          token: config.dashboard?.apiKey,
           createdAt: Date.now(),
-          expiresAt: Date.now() + 10 * 60 * 1000,
+          expiresAt: Date.now() + 5 * 60 * 1000,
         });
         return newCode;
       })();
@@ -406,6 +411,7 @@ export function createPairRoutes(): Router {
       machineId: data.machineId,
       machineName: data.machineName,
       agentUrl: data.agentUrl,
+      token: data.token,
       expiresAt: data.expiresAt,
     });
   });

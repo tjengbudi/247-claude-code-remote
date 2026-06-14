@@ -43,6 +43,7 @@ export async function POST(req: Request) {
         machineId: body.machineId,
         method: body.method || 'tailscale',
         color: body.color,
+        token: body.token,
       })
       .returning();
 

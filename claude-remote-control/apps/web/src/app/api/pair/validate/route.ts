@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { lookupPairingCode } from '@/lib/pairing-codes';
+import { getClientIP, isRateLimited, recordFailure, resetFailures } from '@/lib/pair-rate-limit';
 
 /**
  * Decode a token without verifying signature.
@@ -61,6 +62,12 @@ async function verifyWithAgent(
 
 export async function POST(req: Request) {
   try {
+    const ip = getClientIP(req);
+
+    if (isRateLimited(ip)) {
+      return NextResponse.json({ error: 'Too many attempts' }, { status: 429 });
+    }
+
     const body = await req.json();
     const { token, code } = body;
 
@@ -69,17 +76,21 @@ export async function POST(req: Request) {
       const codeInfo = lookupPairingCode(code);
 
       if (!codeInfo) {
+        recordFailure(ip);
         return NextResponse.json(
           { valid: false, error: 'Invalid or expired code' },
           { status: 400 }
         );
       }
 
+      resetFailures(ip);
+
       return NextResponse.json({
         valid: true,
         machineId: codeInfo.machineId,
         machineName: codeInfo.machineName,
         agentUrl: codeInfo.agentUrl,
+        token: codeInfo.token,
       });
     }
 
@@ -95,14 +106,17 @@ export async function POST(req: Request) {
     const { payload, error } = decodeToken(token);
 
     if (!payload || error) {
+      recordFailure(ip);
       return NextResponse.json({ valid: false, error: error || 'Invalid token' }, { status: 400 });
     }
 
     const machineId = payload.mid as string;
     const machineName = payload.mn as string;
     const agentUrl = payload.url as string;
+    const agentToken = payload.tok as string | undefined;
 
     if (!machineId || !machineName || !agentUrl) {
+      recordFailure(ip);
       return NextResponse.json(
         { valid: false, error: 'Incomplete token payload' },
         { status: 400 }
@@ -119,11 +133,14 @@ export async function POST(req: Request) {
       console.warn(`Token verification failed for ${agentUrl}: ${verification.error}`);
     }
 
+    resetFailures(ip);
+
     return NextResponse.json({
       valid: true,
       machineId,
       machineName,
       agentUrl,
+      token: agentToken,
       verified: verification.valid,
     });
   } catch (error) {

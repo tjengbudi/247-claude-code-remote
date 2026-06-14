@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { registerPairingCode, lookupPairingCode } from '@/lib/pairing-codes';
+import { getClientIP, isRateLimited, recordFailure, resetFailures } from '@/lib/pair-rate-limit';
 
 /**
  * POST /api/pair/code - Register a pairing code from an agent
@@ -7,7 +8,7 @@ import { registerPairingCode, lookupPairingCode } from '@/lib/pairing-codes';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { code, machineId, machineName, agentUrl } = body;
+    const { code, machineId, machineName, agentUrl, token } = body;
 
     if (!code || !machineId || !machineName || !agentUrl) {
       return NextResponse.json(
@@ -26,12 +27,13 @@ export async function POST(req: Request) {
       machineId,
       machineName,
       agentUrl,
+      token,
     });
 
     return NextResponse.json({
       success: true,
       code,
-      expiresIn: 10 * 60 * 1000, // 10 minutes
+      expiresIn: 5 * 60 * 1000, // 5 minutes
     });
   } catch (error) {
     console.error('Error registering pairing code:', error);
@@ -44,6 +46,12 @@ export async function POST(req: Request) {
  */
 export async function GET(req: Request) {
   try {
+    const ip = getClientIP(req);
+
+    if (isRateLimited(ip)) {
+      return NextResponse.json({ error: 'Too many attempts' }, { status: 429 });
+    }
+
     const { searchParams } = new URL(req.url);
     const code = searchParams.get('code');
 
@@ -54,14 +62,18 @@ export async function GET(req: Request) {
     const codeInfo = lookupPairingCode(code);
 
     if (!codeInfo) {
+      recordFailure(ip);
       return NextResponse.json({ error: 'Invalid or expired code' }, { status: 404 });
     }
+
+    resetFailures(ip);
 
     return NextResponse.json({
       valid: true,
       machineId: codeInfo.machineId,
       machineName: codeInfo.machineName,
       agentUrl: codeInfo.agentUrl,
+      token: codeInfo.token,
       expiresAt: codeInfo.expiresAt,
     });
   } catch (error) {

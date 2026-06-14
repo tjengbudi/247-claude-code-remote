@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { verifyToken, createToken, generateCode, pairingCodes } from '../../src/routes/pair.js';
+import { config } from '../../src/config.js';
 
 // Mock the config module
 vi.mock('../../src/config.js', () => ({
@@ -14,6 +15,7 @@ vi.mock('../../src/config.js', () => ({
     },
     dashboard: {
       apiUrl: 'http://localhost:3001/api',
+      apiKey: 'test-agent-auth-token-12345',
     },
     projects: {
       basePath: '~/Dev',
@@ -53,6 +55,36 @@ describe('Pairing Routes', () => {
       expect(decodedPayload.exp).toBeDefined();
       expect(decodedPayload.iat).toBeDefined();
       expect(decodedPayload.mid).toBe('test-id');
+    });
+
+    it('should include tok in HMAC payload when apiKey is present', () => {
+      const payload = {
+        mid: 'test-id',
+        mn: 'Test',
+        url: 'localhost:4678',
+        tok: config.dashboard?.apiKey,
+      };
+      const token = createToken(payload, 'test-secret', 5 * 60 * 1000);
+
+      const [payloadStr] = token.split('.');
+      const decodedPayload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString());
+
+      expect(decodedPayload.tok).toBe('test-agent-auth-token-12345');
+    });
+
+    it('should omit tok from HMAC payload when apiKey is absent', () => {
+      const payload = {
+        mid: 'test-id',
+        mn: 'Test',
+        url: 'localhost:4678',
+        tok: undefined,
+      };
+      const token = createToken(payload, 'test-secret', 5 * 60 * 1000);
+
+      const [payloadStr] = token.split('.');
+      const decodedPayload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString());
+
+      expect(decodedPayload.tok).toBeUndefined();
     });
   });
 
@@ -140,6 +172,38 @@ describe('Pairing Routes', () => {
       const retrieved = pairingCodes.get('nonexistent');
 
       expect(retrieved).toBeUndefined();
+    });
+
+    it('should store token in PairingCode when apiKey is present', () => {
+      const code = '123456';
+      pairingCodes.set(code, {
+        code,
+        machineId: 'test-machine',
+        machineName: 'Test Machine',
+        agentUrl: 'localhost:4678',
+        token: config.dashboard?.apiKey,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      });
+
+      const stored = pairingCodes.get(code);
+      expect(stored?.token).toBe('test-agent-auth-token-12345');
+    });
+
+    it('should allow token to be undefined in PairingCode', () => {
+      const code = '789012';
+      pairingCodes.set(code, {
+        code,
+        machineId: 'test-machine',
+        machineName: 'Test Machine',
+        agentUrl: 'localhost:4678',
+        token: undefined,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      });
+
+      const stored = pairingCodes.get(code);
+      expect(stored?.token).toBeUndefined();
     });
   });
 });

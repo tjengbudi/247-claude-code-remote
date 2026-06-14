@@ -1,7 +1,8 @@
 /**
  * In-memory pairing code storage for dashboard.
  * Codes are registered by agents and looked up by users.
- * TTL: 10 minutes, single-use (deleted after lookup).
+ * TTL: 5 minutes. Codes are multi-use within the TTL — lookupPairingCode does
+ * NOT consume the code; only expiry (swept every minute) removes it.
  */
 
 export interface PairingCodeInfo {
@@ -9,11 +10,12 @@ export interface PairingCodeInfo {
   machineId: string;
   machineName: string;
   agentUrl: string;
+  token?: string;
   createdAt: number;
   expiresAt: number;
 }
 
-// In-memory store - codes expire after 10 minutes
+// In-memory store - codes expire after 5 minutes
 const pairingCodes = new Map<string, PairingCodeInfo>();
 
 // Cleanup interval - remove expired codes every minute
@@ -43,7 +45,7 @@ export function registerPairingCode(info: Omit<PairingCodeInfo, 'createdAt' | 'e
   pairingCodes.set(info.code, {
     ...info,
     createdAt: now,
-    expiresAt: now + 10 * 60 * 1000, // 10 minutes
+    expiresAt: now + 5 * 60 * 1000, // 5 minutes
   });
 }
 
@@ -66,3 +68,6 @@ export function lookupPairingCode(code: string): PairingCodeInfo | null {
 
   return data;
 }
+
+// Export for testing
+export { pairingCodes };

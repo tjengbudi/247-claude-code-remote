@@ -301,6 +301,45 @@ sudo loginctl disable-linger $USER
 - Mengirim command ke tmux
 - Mengakses terminal
 
+### Model Ancaman Pairing Token (Track 2)
+
+**Penerimaan Deferral:** Dalam arsitektur Track 2 (self-host di trusted LAN atau melalui https-tunnel), pairing token-leg **tidak dienkripsi**. Ini adalah keputusan arsitektur yang diterima dan terdokumentasi, bukan TODO yang tertunda.
+
+**Mitigasi yang Diterapkan:**
+- **Postur jaringan trusted:** LAN terisolasi atau https-tunnel (Tailscale/Cloudflare Tunnel)
+- **TTL pendek:** Pairing code dan token HMAC kadaluarsa dalam ≤5 menit
+- **Perlindungan HMAC:** Pairing flow menggunakan signature HMAC untuk integritas payload
+- **Rate-limiting lookup:** Maksimal 5 percobaan gagal per IP per 10 menit (HTTP 429 setelah limit tercapai)
+
+Kombinasi mitigasi ini memberikan perlindungan memadai untuk postur Track 2 tanpa enkripsi tambahan pada token-leg.
+
+### ⚠️ PENTING: Konfigurasi Dashboard URL Sebelum Pairing
+
+**Footgun Eksposur URL:** `agentAuthToken` disematkan dalam pairing link (`${dashboardUrl}/connect?token=…`) yang muncul di:
+- QR code yang ditampilkan di layar agent
+- Browser history di device yang melakukan pairing
+- Referrer headers saat navigasi
+- Log server dan proxy
+
+**WAJIB:** Sebelum melakukan pairing, self-hoster **HARUS** mengonfigurasi `config.dashboard.apiUrl` ke dashboard lokal/LAN mereka sendiri:
+
+```bash
+# Edit ~/.247/config.json
+{
+  "dashboard": {
+    "apiUrl": "http://192.168.1.100:3000/api"  # Ganti dengan URL dashboard lokal Anda
+  }
+}
+```
+
+**JANGAN** biarkan `config.dashboard.apiUrl` menggunakan default `https://247.quivr.com` (fallback di `pair.ts:89-96`). Jika dibiarkan default, bearer token host-shell akan ditempatkan di URL yang mengarah ke domain cloud, mengekspos kredensial sensitif ke internet.
+
+**Cara kerja `getDashboardUrl()`:**
+- Jika `config.dashboard.apiUrl` diset → gunakan nilai tersebut (hapus suffix `/api`)
+- Jika tidak diset → fallback ke `https://247.quivr.com` (BAHAYA untuk self-host)
+
+Pastikan nilai yang Anda set menunjuk ke dashboard lokal/LAN Anda, bukan domain publik.
+
 ### Firewall Configuration
 
 **Rekomendasi:** Batasi akses ke trusted IP/subnet saja.

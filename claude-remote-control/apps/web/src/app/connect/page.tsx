@@ -11,6 +11,7 @@ interface AgentInfo {
   machineId: string;
   machineName: string;
   agentUrl: string;
+  token?: string;
   valid: boolean;
   error?: string;
 }
@@ -142,6 +143,7 @@ function ConnectContent() {
           name: agentInfo.machineName,
           machineId: agentInfo.machineId,
           method: agentInfo.agentUrl.includes('.ts.net') ? 'tailscale' : 'custom',
+          token: agentInfo.token,
         }),
       });
 
