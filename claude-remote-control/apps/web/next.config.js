@@ -26,9 +26,9 @@ const nextConfig = {
   outputFileTracingIncludes: {
     // better-sqlite3 ships a native .node binary the tracer misses for prebuilt
     // deps; without it the standalone Docker image throws "Could not locate the
-    // bindings file" on first DB use. drizzle/** ships the migration SQL (AC6).
+    // bindings file" on first DB use. drizzle/** ships the migration SQL files
+    // read via fs at runtime (not import-detected by the tracer).
     '/*': [
-      './node_modules/@neondatabase/**',
       './node_modules/better-sqlite3/**',
       './drizzle/**',
     ],

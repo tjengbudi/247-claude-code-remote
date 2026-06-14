@@ -147,9 +147,6 @@ importers:
       '@neondatabase/auth':
         specifier: 0.1.0-beta.21
         version: 0.1.0-beta.21(d6lgxb5z5e7q4oxpozze3be2jq)
-      '@neondatabase/serverless':
-        specifier: ^1.0.2
-        version: 1.0.2
       '@radix-ui/react-alert-dialog':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -6192,6 +6189,7 @@ snapshots:
     dependencies:
       '@types/node': 22.19.3
       '@types/pg': 8.16.0
+    optional: true
 
   '@next/env@16.1.1': {}
 
@@ -7200,6 +7198,7 @@ snapshots:
       '@types/node': 22.19.3
       pg-protocol: 1.11.0
       pg-types: 2.2.0
+    optional: true
 
   '@types/qs@6.14.0': {}
 
@@ -9381,9 +9380,11 @@ snapshots:
 
   peberminta@0.9.0: {}
 
-  pg-int8@1.0.1: {}
+  pg-int8@1.0.1:
+    optional: true
 
-  pg-protocol@1.11.0: {}
+  pg-protocol@1.11.0:
+    optional: true
 
   pg-types@2.2.0:
     dependencies:
@@ -9392,6 +9393,7 @@ snapshots:
       postgres-bytea: 1.0.1
       postgres-date: 1.0.7
       postgres-interval: 1.2.0
+    optional: true
 
   picocolors@1.1.1: {}
 
@@ -9492,15 +9494,19 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  postgres-array@2.0.0: {}
+  postgres-array@2.0.0:
+    optional: true
 
-  postgres-bytea@1.0.1: {}
+  postgres-bytea@1.0.1:
+    optional: true
 
-  postgres-date@1.0.7: {}
+  postgres-date@1.0.7:
+    optional: true
 
   postgres-interval@1.2.0:
     dependencies:
       xtend: 4.0.2
+    optional: true
 
   postgres@3.4.8:
     optional: true
@@ -10642,7 +10648,8 @@ snapshots:
 
   ws@8.19.0: {}
 
-  xtend@4.0.2: {}
+  xtend@4.0.2:
+    optional: true
 
   yaml@2.8.2: {}
 
