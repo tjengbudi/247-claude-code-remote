@@ -25,7 +25,7 @@ vi.mock('fs', () => ({
 // Mock crypto
 vi.mock('crypto', () => ({
   randomUUID: () => 'test-uuid-1234',
-  randomBytes: (size: number) => Buffer.alloc(size, 0),
+  randomBytes: vi.fn((size: number) => Buffer.alloc(size, 0)),
 }));
 
 describe('CLI Config', () => {
@@ -289,6 +289,46 @@ describe('CLI Config', () => {
       expect(config.dashboard?.apiUrl).toBe('https://example.com');
     });
 
+    it('per-secret generate-once survives a second re-init (missing apiKey minted once, then pinned)', async () => {
+      const { randomBytes } = await import('crypto');
+      const { createConfig } = await import('../../src/lib/config.js');
+
+      // Queue ONE distinct non-zero value for the mint (fill 7 ≠ 0)
+      // This makes the minted token different from the all-A baseline
+      vi.mocked(randomBytes).mockReturnValueOnce(Buffer.alloc(32, 7));
+
+      const existing = {
+        machine: { id: 'seeded-real-uuid', name: 'Old Name' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: [] },
+        // No dashboard field - apiKey should be minted on first run
+      };
+
+      // Run 1: mints the missing apiKey
+      const run1 = createConfig({ machineName: 'M', existing });
+
+      expect(run1.machine.id).toBe('seeded-real-uuid');
+      expect(run1.dashboard?.apiKey).toBeDefined();
+
+      // The minted token should be base64url of all-7 buffer (not all-A baseline)
+      const expectedToken = Buffer.alloc(32, 7).toString('base64url');
+      expect(run1.dashboard?.apiKey).toBe(expectedToken);
+      expect(run1.dashboard?.apiKey).toMatch(/^[A-Za-z0-9_-]+$/);
+      expect(run1.dashboard?.apiKey?.length).toBe(expectedToken.length);
+
+      // Run 2: must preserve the once-minted token (not re-mint)
+      const run2 = createConfig({ machineName: 'M', existing: run1 });
+
+      expect(run2.machine.id).toBe('seeded-real-uuid');
+      expect(run2.dashboard?.apiKey).toBe(run1.dashboard?.apiKey);
+
+      // Lock the assumption that the queued mockReturnValueOnce was consumed exactly
+      // once (by run1's mint) and run2 did NOT call randomBytes. vi.clearAllMocks()
+      // does not drain a *Once queue, so if a future refactor stops run1 from minting,
+      // the all-7 buffer would leak into the next test — this guard fails loudly first.
+      expect(vi.mocked(randomBytes)).toHaveBeenCalledTimes(1);
+    });
+
     it('generates new secrets when not in existing config', async () => {
       const { createConfig } = await import('../../src/lib/config.js');
       const existing = {
@@ -360,6 +400,49 @@ describe('CLI Config', () => {
       // Falls back to a freshly minted id rather than crashing.
       expect(config.machine.id).toBe('test-uuid-1234');
       expect(config.machine.name).toBe('Test');
+    });
+
+    it('247 init -f is idempotent: machine.id + apiKey stable across repeated re-inits', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+
+      // CRITICAL: seeded values MUST differ from mocked-fresh constants
+      // (randomUUID → 'test-uuid-1234', randomBytes(32) → all-zero base64url).
+      // Otherwise a buggy regenerate-always createConfig would still pass.
+      const existing = {
+        machine: { id: 'seeded-real-uuid', name: 'Old Name' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: ['project-a', 'project-b'] },
+        dashboard: { apiUrl: 'https://seeded.example.com', apiKey: 'seeded-real-token-xyz' },
+        editor: { enabled: true, portRange: { start: 5000, end: 5010 }, idleTimeout: 60000 },
+      };
+
+      // Simulate the fixpoint loop: each run's output becomes the next run's existing
+      const run1 = createConfig({ machineName: 'M', existing });
+      const run2 = createConfig({ machineName: 'M', existing: run1 });
+      const run3 = createConfig({ machineName: 'M', existing: run2 });
+
+      // All runs preserve the seeded distinct values
+      expect(run1.machine.id).toBe('seeded-real-uuid');
+      expect(run2.machine.id).toBe('seeded-real-uuid');
+      expect(run3.machine.id).toBe('seeded-real-uuid');
+
+      expect(run1.dashboard?.apiKey).toBe('seeded-real-token-xyz');
+      expect(run2.dashboard?.apiKey).toBe('seeded-real-token-xyz');
+      expect(run3.dashboard?.apiKey).toBe('seeded-real-token-xyz');
+
+      // apiUrl walks the `preservedApiUrl ? {apiUrl,apiKey} : {apiKey}` branch — guard
+      // against a regression that drops it on the 2nd/3rd re-init.
+      expect(run1.dashboard?.apiUrl).toBe('https://seeded.example.com');
+      expect(run2.dashboard?.apiUrl).toBe('https://seeded.example.com');
+      expect(run3.dashboard?.apiUrl).toBe('https://seeded.example.com');
+
+      // User-curated state (whitelist, editor) must survive the fixpoint loop too.
+      expect(run3.projects.whitelist).toEqual(['project-a', 'project-b']);
+      expect(run3.editor).toEqual({
+        enabled: true,
+        portRange: { start: 5000, end: 5010 },
+        idleTimeout: 60000,
+      });
     });
   });
 

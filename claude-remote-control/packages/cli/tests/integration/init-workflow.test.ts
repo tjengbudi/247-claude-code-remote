@@ -255,6 +255,42 @@ describe('247 init workflow', () => {
       // agentAuthToken (dashboard.apiKey) should also be generated
       expect(savedConfig.dashboard?.apiKey).toBeDefined();
     });
+
+    it('preserves secrets across two successive --force runs', async () => {
+      // CRITICAL: seeded values MUST differ from integration mock constants
+      // (randomUUID → 'generated-uuid-1234', randomBytes → all-zero base64url).
+      // Otherwise a buggy regenerate-always path would still pass.
+      const seededConfig = {
+        ...validConfig,
+        machine: { id: 'seeded-real-uuid', name: 'X' },
+        dashboard: { apiKey: 'seeded-real-token-xyz' },
+      };
+      fsState.files.set(mockPaths.configPath, JSON.stringify(seededConfig));
+      promptResponses = [];
+
+      const { initCommand } = await import('../../src/commands/init.js');
+
+      // First --force run
+      await initCommand.parseAsync(['node', '247', 'init', '--force', '--name', 'n1']);
+      const afterFirst = JSON.parse(fsState.files.get(mockPaths.configPath)!);
+
+      // Second --force run
+      await initCommand.parseAsync(['node', '247', 'init', '--force', '--name', 'n2']);
+      const afterSecond = JSON.parse(fsState.files.get(mockPaths.configPath)!);
+
+      // machine.id preserved across both runs
+      expect(afterFirst.machine.id).toBe('seeded-real-uuid');
+      expect(afterSecond.machine.id).toBe('seeded-real-uuid');
+
+      // dashboard.apiKey preserved across both runs
+      expect(afterFirst.dashboard?.apiKey).toBe('seeded-real-token-xyz');
+      expect(afterSecond.dashboard?.apiKey).toBe('seeded-real-token-xyz');
+
+      // machine.name is user-facing and changes per run (do NOT assert it stays pinned).
+      // Assert BOTH runs so a "--name ignored on first --force" bug can't slip through.
+      expect(afterFirst.machine.name).toBe('n1');
+      expect(afterSecond.machine.name).toBe('n2');
+    });
   });
 
   describe('prerequisites checking', () => {
