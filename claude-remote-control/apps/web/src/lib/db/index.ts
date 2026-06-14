@@ -52,8 +52,17 @@ export function getDb() {
       throw new Error(`[web.db] cannot open ${DB_PATH}: ${(e as Error).message}`);
     }
 
-    // Enable WAL mode for better concurrent performance (mirrors agent)
-    sqlite.pragma('journal_mode = WAL');
+    // Enable WAL mode for better concurrent performance (mirrors agent).
+    // pragma returns the mode actually applied: a network FS (NFS/SMB) can
+    // silently refuse WAL and fall back, which risks corruption — warn loudly
+    // rather than degrade silently.
+    const journalMode = sqlite.pragma('journal_mode = WAL', { simple: true });
+    if (journalMode !== 'wal') {
+      console.warn(
+        `[web.db] WAL not enabled (got '${journalMode}') for ${DB_PATH} — ` +
+          `the path may be on a network filesystem unsupported by WAL`
+      );
+    }
     // Enable foreign key enforcement (AC5 - better-sqlite3 defaults OFF)
     sqlite.pragma('foreign_keys = ON');
 
