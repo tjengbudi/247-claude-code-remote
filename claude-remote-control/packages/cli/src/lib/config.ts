@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 import { getAgentPaths, ensureDirectories } from './paths.js';
 
 export interface AgentConfig {
@@ -20,6 +20,19 @@ export interface AgentConfig {
     portRange: { start: number; end: number };
     idleTimeout: number;
   };
+  dashboard?: {
+    apiUrl?: string;
+    apiKey?: string;
+  };
+}
+
+/**
+ * Generate a URL-safe base64 token for agent authentication.
+ * 32 bytes -> 43 chars base64url (no +, /, or = characters).
+ * Suitable for Sec-WebSocket-Protocol values per D7 wire contract.
+ */
+export function generateAgentAuthToken(): string {
+  return randomBytes(32).toString('base64url');
 }
 
 const DEFAULT_CONFIG: AgentConfig = {
@@ -167,17 +180,29 @@ export function saveConfig(config: AgentConfig, profileName?: string | null): vo
 }
 
 /**
- * Create a new configuration with defaults
+ * Create a new configuration with defaults.
+ *
+ * Secrets (machine.id, dashboard.apiKey) follow generate-once discipline:
+ * if `existing` is provided, those values are preserved; only missing
+ * secrets are minted. Non-secret fields (machine.name, agent.port,
+ * projects.basePath) are always taken from the provided options so that
+ * `247 init -f` can overwrite user-facing settings without regenerating
+ * the pairing-critical machine.id.
  */
 export function createConfig(options: {
   machineName: string;
   port?: number;
   projectsPath?: string;
+  existing?: AgentConfig | null;
 }): AgentConfig {
+  const preservedMachineId = options.existing?.machine.id || randomUUID();
+  const preservedApiKey = options.existing?.dashboard?.apiKey || generateAgentAuthToken();
+  const preservedApiUrl = options.existing?.dashboard?.apiUrl;
+
   return {
     ...DEFAULT_CONFIG,
     machine: {
-      id: randomUUID(),
+      id: preservedMachineId,
       name: options.machineName,
     },
     agent: {
@@ -187,6 +212,9 @@ export function createConfig(options: {
       basePath: options.projectsPath ?? DEFAULT_CONFIG.projects.basePath,
       whitelist: [],
     },
+    dashboard: preservedApiUrl
+      ? { apiUrl: preservedApiUrl, apiKey: preservedApiKey }
+      : { apiKey: preservedApiKey },
   };
 }
 

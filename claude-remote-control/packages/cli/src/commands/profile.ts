@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { randomUUID } from 'crypto';
 import {
   listProfiles,
   loadConfig,
@@ -8,6 +9,7 @@ import {
   profileExists,
   createConfig,
   getProfilePath,
+  generateAgentAuthToken,
 } from '../lib/config.js';
 
 export const profileCommand = new Command('profile')
@@ -96,6 +98,15 @@ export const profileCommand = new Command('profile')
           if (options.machineName) {
             config.machine.name = options.machineName;
           }
+
+          // Copied profiles must NOT share machine.id or agentAuthToken —
+          // they are distinct agents that would collide on the dashboard
+          // and share a bearer secret, defeating generate-once (Epic 3).
+          config.machine = { ...config.machine, id: randomUUID() };
+          config.dashboard = {
+            ...config.dashboard,
+            apiKey: generateAgentAuthToken(),
+          };
         } else {
           const machineName = options.machineName || `${name} agent`;
           config = createConfig({

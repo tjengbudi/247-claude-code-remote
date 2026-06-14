@@ -95,10 +95,14 @@ export const initCommand = new Command('init')
     const configSpinner = ora(`Creating configuration${profileLabel}...`).start();
     try {
       ensureDirectories();
+      // Load existing config so generate-once secrets (machine.id,
+      // agentAuthToken) survive re-init and --force runs (AC1, AC4).
+      const existing = loadConfig(profileName);
       const config = createConfig({
         machineName,
         port,
         projectsPath,
+        existing,
       });
       saveConfig(config, profileName);
       configSpinner.succeed(`Configuration${profileLabel} saved`);

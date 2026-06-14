@@ -65,6 +65,7 @@ vi.mock('fs', () => ({
 // Mock crypto
 vi.mock('crypto', () => ({
   randomUUID: () => 'lifecycle-test-uuid',
+  randomBytes: (size: number) => Buffer.alloc(size, 0),
 }));
 
 // Mock child_process

@@ -57,9 +57,10 @@ vi.mock('fs', () => {
   };
 });
 
-// Mock crypto for UUID generation
+// Mock crypto for UUID and token generation
 vi.mock('crypto', () => ({
   randomUUID: () => 'generated-uuid-1234',
+  randomBytes: (size: number) => Buffer.alloc(size, 0),
 }));
 
 // Mock child_process for prerequisite checks
@@ -249,7 +250,10 @@ describe('247 init workflow', () => {
 
       const savedConfig = JSON.parse(fsState.files.get(mockPaths.configPath)!);
       expect(savedConfig.machine.name).toBe('new-name');
-      expect(savedConfig.machine.id).toBe('generated-uuid-1234'); // New UUID
+      // Story 2.1: machine.id is generate-once and preserved across --force
+      expect(savedConfig.machine.id).toBe(validConfig.machine.id);
+      // agentAuthToken (dashboard.apiKey) should also be generated
+      expect(savedConfig.dashboard?.apiKey).toBeDefined();
     });
   });
 

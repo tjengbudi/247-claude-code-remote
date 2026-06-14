@@ -25,6 +25,7 @@ vi.mock('fs', () => ({
 // Mock crypto
 vi.mock('crypto', () => ({
   randomUUID: () => 'test-uuid-1234',
+  randomBytes: (size: number) => Buffer.alloc(size, 0),
 }));
 
 describe('CLI Config', () => {
@@ -246,6 +247,76 @@ describe('CLI Config', () => {
 
       expect(config.agent.port).toBe(5000);
       expect(config.projects.basePath).toBe('/custom/path');
+    });
+
+    it('generates dashboard.apiKey as URL-safe base64 token', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const config = createConfig({ machineName: 'My Machine' });
+
+      expect(config.dashboard).toBeDefined();
+      expect(config.dashboard?.apiKey).toBeDefined();
+      // Should be URL-safe base64 (no +, /, or = characters)
+      expect(config.dashboard?.apiKey).toMatch(/^[A-Za-z0-9_-]+$/);
+      expect(config.dashboard?.apiKey?.length).toBe(43); // 32 bytes -> 43 chars base64url
+    });
+
+    it('preserves existing machine.id when provided', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const existing = {
+        machine: { id: 'existing-uuid', name: 'Old Name' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: [] },
+      };
+
+      const config = createConfig({ machineName: 'New Name', existing });
+
+      expect(config.machine.id).toBe('existing-uuid');
+      expect(config.machine.name).toBe('New Name');
+    });
+
+    it('preserves existing dashboard.apiKey when provided', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const existing = {
+        machine: { id: 'test-id', name: 'Test' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: [] },
+        dashboard: { apiKey: 'existing-token-abc123', apiUrl: 'https://example.com' },
+      };
+
+      const config = createConfig({ machineName: 'Test', existing });
+
+      expect(config.dashboard?.apiKey).toBe('existing-token-abc123');
+      expect(config.dashboard?.apiUrl).toBe('https://example.com');
+    });
+
+    it('generates new secrets when not in existing config', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const existing = {
+        machine: { id: '', name: 'Test' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: [] },
+      };
+
+      const config = createConfig({ machineName: 'Test', existing });
+
+      expect(config.machine.id).toBe('test-uuid-1234');
+      expect(config.dashboard?.apiKey).toBeDefined();
+    });
+
+    it('handles partial existing config (only machine.id present)', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const existing = {
+        machine: { id: 'preserved-uuid', name: 'Test' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: [] },
+        // No dashboard field - should generate apiKey
+      };
+
+      const config = createConfig({ machineName: 'Test', existing });
+
+      expect(config.machine.id).toBe('preserved-uuid');
+      expect(config.dashboard?.apiKey).toBeDefined();
+      expect(config.dashboard?.apiKey).toMatch(/^[A-Za-z0-9_-]+$/);
     });
   });
 
