@@ -213,5 +213,41 @@ describe('Database Driver (better-sqlite3)', () => {
       expect(Array.isArray(users)).toBe(true);
       expect(Array.isArray(sessions)).toBe(true);
     });
+
+    it('fails closed with actionable error on a pre-populated, unbookmarked DB', async () => {
+      // Simulate a DB created by db:push / manual bootstrap: app table exists but
+      // there is no __drizzle_migrations history. migrate() would otherwise die
+      // with an opaque "table already exists"; we expect a clear actionable error.
+      const dbPath = join(tempDir, 'prepopulated.db');
+      const Database = (await import('better-sqlite3')).default;
+      const seed = new Database(dbPath);
+      seed.exec(`CREATE TABLE user (id text PRIMARY KEY, username text, email text)`);
+      seed.close();
+
+      process.env.WEB_DB_PATH = dbPath;
+      vi.resetModules();
+
+      await expect(async () => {
+        const { getDb } = await import('@/lib/db');
+        getDb();
+      }).rejects.toThrow(/no drizzle migration history/i);
+    });
+
+    it('reopens an app-created DB without error (bookkeeping present)', async () => {
+      const dbPath = join(tempDir, 'reopen.db');
+      process.env.WEB_DB_PATH = dbPath;
+
+      // First open creates tables + __drizzle_migrations bookkeeping.
+      const first = await import('@/lib/db');
+      first.getDb();
+
+      // Second open against the same file must succeed (migrate is idempotent,
+      // and the precheck sees migration history so it does not fail closed).
+      vi.resetModules();
+      const second = await import('@/lib/db');
+      const db = second.getDb();
+      const users = await db.select().from(second.user);
+      expect(Array.isArray(users)).toBe(true);
+    });
   });
 });
