@@ -14,23 +14,27 @@ export function stripProtocol(url: string): string {
 }
 
 /**
+ * Check if the current page is served over HTTPS
+ * SSR-safe: returns false in non-browser contexts
+ */
+function pageIsSecure(): boolean {
+  return typeof window !== 'undefined' && window.location.protocol === 'https:';
+}
+
+/**
  * Build a WebSocket URL from an agent URL
- * Handles both URLs with and without protocol
+ * Follows the page protocol: page http: → ws, page https: → wss
  */
 export function buildWebSocketUrl(agentUrl: string, path: string): string {
   const cleanUrl = stripProtocol(agentUrl);
-  const isLocalhost = cleanUrl.includes('localhost') || cleanUrl.startsWith('127.0.0.1');
-  const wsProtocol = isLocalhost ? 'ws' : 'wss';
-  return `${wsProtocol}://${cleanUrl}${path}`;
+  return `${pageIsSecure() ? 'wss' : 'ws'}://${cleanUrl}${path}`;
 }
 
 /**
  * Build an HTTP API URL from an agent URL
- * Handles both URLs with and without protocol
+ * Follows the page protocol: page http: → http, page https: → https
  */
 export function buildApiUrl(agentUrl: string, path: string): string {
   const cleanUrl = stripProtocol(agentUrl);
-  const isLocalhost = cleanUrl.includes('localhost') || cleanUrl.startsWith('127.0.0.1');
-  const protocol = isLocalhost ? 'http' : 'https';
-  return `${protocol}://${cleanUrl}${path}`;
+  return `${pageIsSecure() ? 'https' : 'http'}://${cleanUrl}${path}`;
 }

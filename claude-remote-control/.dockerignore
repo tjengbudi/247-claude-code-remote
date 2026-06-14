@@ -40,8 +40,7 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Web app (not needed for agent container)
-apps/web
+# Web app - included for web Dockerfile (agent build only COPYs apps/agent + packages/shared)
 
 # Scripts (not needed in container)
 scripts/

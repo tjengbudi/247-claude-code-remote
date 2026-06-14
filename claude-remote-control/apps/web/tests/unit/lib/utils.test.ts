@@ -3,7 +3,7 @@
  *
  * Tests for utility functions used across the application.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { cn, stripProtocol, buildWebSocketUrl, buildApiUrl } from '@/lib/utils';
 
 describe('Utils', () => {
@@ -121,117 +121,215 @@ describe('Utils', () => {
   });
 
   describe('buildWebSocketUrl', () => {
-    it('builds ws:// URL for localhost', () => {
+    const originalProtocol = window.location.protocol;
+
+    afterEach(() => {
+      Object.defineProperty(window, 'location', {
+        value: { ...window.location, protocol: originalProtocol },
+        writable: true,
+      });
+    });
+
+    function setPageProtocol(protocol: 'http:' | 'https:') {
+      Object.defineProperty(window, 'location', {
+        value: { ...window.location, protocol },
+        writable: true,
+      });
+    }
+
+    it('builds ws:// URL when page is http (localhost)', () => {
+      setPageProtocol('http:');
       expect(buildWebSocketUrl('localhost:4678', '/status')).toBe('ws://localhost:4678/status');
     });
 
-    it('builds ws:// URL for 127.0.0.1', () => {
+    it('builds ws:// URL when page is http (127.0.0.1)', () => {
+      setPageProtocol('http:');
       expect(buildWebSocketUrl('127.0.0.1:4678', '/status')).toBe('ws://127.0.0.1:4678/status');
     });
 
-    it('builds wss:// URL for non-localhost domains', () => {
+    it('builds ws:// URL when page is http (LAN IP)', () => {
+      setPageProtocol('http:');
+      expect(buildWebSocketUrl('192.168.1.50:4678', '/status')).toBe(
+        'ws://192.168.1.50:4678/status'
+      );
+    });
+
+    it('builds wss:// URL when page is https (any domain)', () => {
+      setPageProtocol('https:');
       expect(buildWebSocketUrl('example.com:4678', '/status')).toBe(
         'wss://example.com:4678/status'
       );
     });
 
+    it('builds ws:// URL when page is http (any domain)', () => {
+      setPageProtocol('http:');
+      expect(buildWebSocketUrl('example.com:4678', '/status')).toBe(
+        'ws://example.com:4678/status'
+      );
+    });
+
     it('strips existing https:// protocol before building URL', () => {
+      setPageProtocol('http:');
       expect(buildWebSocketUrl('https://example.com:4678', '/status')).toBe(
-        'wss://example.com:4678/status'
+        'ws://example.com:4678/status'
       );
     });
 
     it('strips existing http:// protocol before building URL', () => {
+      setPageProtocol('https:');
       expect(buildWebSocketUrl('http://localhost:4678', '/status')).toBe(
-        'ws://localhost:4678/status'
+        'wss://localhost:4678/status'
       );
     });
 
-    it('handles Tailscale URLs with protocol', () => {
-      expect(buildWebSocketUrl('https://macbook-pro.tail5f910b.ts.net:4678', '/status')).toBe(
-        'wss://macbook-pro.tail5f910b.ts.net:4678/status'
-      );
-    });
-
-    it('handles Tailscale URLs without protocol', () => {
+    it('handles Tailscale URLs - page https → wss', () => {
+      setPageProtocol('https:');
       expect(buildWebSocketUrl('macbook-pro.tail5f910b.ts.net:4678', '/status')).toBe(
         'wss://macbook-pro.tail5f910b.ts.net:4678/status'
       );
     });
 
+    it('handles Tailscale URLs - page http → ws', () => {
+      setPageProtocol('http:');
+      expect(buildWebSocketUrl('macbook-pro.tail5f910b.ts.net:4678', '/status')).toBe(
+        'ws://macbook-pro.tail5f910b.ts.net:4678/status'
+      );
+    });
+
+    it('handles host.local names - page http → ws', () => {
+      setPageProtocol('http:');
+      expect(buildWebSocketUrl('host.local:4678', '/status')).toBe('ws://host.local:4678/status');
+    });
+
     it('handles paths with query parameters', () => {
+      setPageProtocol('http:');
       expect(buildWebSocketUrl('localhost:4678', '/terminal?project=test&session=s1')).toBe(
         'ws://localhost:4678/terminal?project=test&session=s1'
       );
     });
 
     it('handles complex paths', () => {
-      expect(buildWebSocketUrl('https://example.com:4678', '/api/v1/websocket')).toBe(
+      setPageProtocol('https:');
+      expect(buildWebSocketUrl('example.com:4678', '/api/v1/websocket')).toBe(
         'wss://example.com:4678/api/v1/websocket'
+      );
+    });
+
+    it('handles already-prefixed agent URL without doubling protocol', () => {
+      setPageProtocol('http:');
+      expect(buildWebSocketUrl('http://192.168.1.50:4678', '/status')).toBe(
+        'ws://192.168.1.50:4678/status'
       );
     });
   });
 
   describe('buildApiUrl', () => {
-    it('builds http:// URL for localhost', () => {
+    const originalProtocol = window.location.protocol;
+
+    afterEach(() => {
+      Object.defineProperty(window, 'location', {
+        value: { ...window.location, protocol: originalProtocol },
+        writable: true,
+      });
+    });
+
+    function setPageProtocol(protocol: 'http:' | 'https:') {
+      Object.defineProperty(window, 'location', {
+        value: { ...window.location, protocol },
+        writable: true,
+      });
+    }
+
+    it('builds http:// URL when page is http (localhost)', () => {
+      setPageProtocol('http:');
       expect(buildApiUrl('localhost:4678', '/api/sessions')).toBe(
         'http://localhost:4678/api/sessions'
       );
     });
 
-    it('builds http:// URL for 127.0.0.1', () => {
+    it('builds http:// URL when page is http (127.0.0.1)', () => {
+      setPageProtocol('http:');
       expect(buildApiUrl('127.0.0.1:4678', '/api/sessions')).toBe(
         'http://127.0.0.1:4678/api/sessions'
       );
     });
 
-    it('builds https:// URL for non-localhost domains', () => {
+    it('builds http:// URL when page is http (LAN IP)', () => {
+      setPageProtocol('http:');
+      expect(buildApiUrl('192.168.1.50:4678', '/api/sessions')).toBe(
+        'http://192.168.1.50:4678/api/sessions'
+      );
+    });
+
+    it('builds https:// URL when page is https (any domain)', () => {
+      setPageProtocol('https:');
       expect(buildApiUrl('example.com:4678', '/api/sessions')).toBe(
         'https://example.com:4678/api/sessions'
       );
     });
 
+    it('builds http:// URL when page is http (any domain)', () => {
+      setPageProtocol('http:');
+      expect(buildApiUrl('example.com:4678', '/api/sessions')).toBe(
+        'http://example.com:4678/api/sessions'
+      );
+    });
+
     it('strips existing https:// protocol before building URL', () => {
+      setPageProtocol('https:');
       expect(buildApiUrl('https://example.com:4678', '/api/sessions')).toBe(
         'https://example.com:4678/api/sessions'
       );
     });
 
     it('strips existing http:// protocol before building URL', () => {
+      setPageProtocol('http:');
       expect(buildApiUrl('http://localhost:4678', '/api/sessions')).toBe(
         'http://localhost:4678/api/sessions'
       );
     });
 
-    it('handles Tailscale URLs with protocol', () => {
-      expect(buildApiUrl('https://macbook-pro.tail5f910b.ts.net:4678', '/api/sessions')).toBe(
-        'https://macbook-pro.tail5f910b.ts.net:4678/api/sessions'
-      );
-    });
-
-    it('handles Tailscale URLs without protocol', () => {
+    it('handles Tailscale URLs - page https → https', () => {
+      setPageProtocol('https:');
       expect(buildApiUrl('macbook-pro.tail5f910b.ts.net:4678', '/api/sessions')).toBe(
         'https://macbook-pro.tail5f910b.ts.net:4678/api/sessions'
       );
     });
 
+    it('handles Tailscale URLs - page http → http', () => {
+      setPageProtocol('http:');
+      expect(buildApiUrl('macbook-pro.tail5f910b.ts.net:4678', '/api/sessions')).toBe(
+        'http://macbook-pro.tail5f910b.ts.net:4678/api/sessions'
+      );
+    });
+
     it('handles paths with query parameters', () => {
+      setPageProtocol('http:');
       expect(buildApiUrl('localhost:4678', '/api/clone/preview?url=test')).toBe(
         'http://localhost:4678/api/clone/preview?url=test'
       );
     });
 
     it('handles complex paths', () => {
-      expect(buildApiUrl('https://example.com:4678', '/api/sessions/test/archive')).toBe(
+      setPageProtocol('https:');
+      expect(buildApiUrl('example.com:4678', '/api/sessions/test/archive')).toBe(
         'https://example.com:4678/api/sessions/test/archive'
       );
     });
 
     it('handles URL with double protocol correctly', () => {
-      // This is the key bug fix - URLs with existing protocol should not double up
+      // URLs with existing protocol should not double up
+      setPageProtocol('https:');
       expect(
         buildApiUrl('https://macbook-pro.tail5f910b.ts.net:4678', '/api/sessions/archived')
       ).toBe('https://macbook-pro.tail5f910b.ts.net:4678/api/sessions/archived');
+    });
+
+    it('handles already-prefixed agent URL without doubling protocol', () => {
+      setPageProtocol('http:');
+      expect(buildApiUrl('http://192.168.1.50:4678', '/api/sessions')).toBe(
+        'http://192.168.1.50:4678/api/sessions'
+      );
     });
   });
 });

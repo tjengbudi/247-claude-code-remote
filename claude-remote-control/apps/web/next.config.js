@@ -18,6 +18,14 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_APP_VERSION: APP_VERSION,
   },
+  // Standalone output for Docker self-host
+  output: 'standalone',
+  // Required for monorepo: point to workspace root for correct file tracing
+  outputFileTracingRoot: join(__dirname, '../../'),
+  // Force-include dynamic Neon imports that file tracing may miss
+  outputFileTracingIncludes: {
+    '/*': ['./node_modules/@neondatabase/**'],
+  },
 };
 
 export default nextConfig;

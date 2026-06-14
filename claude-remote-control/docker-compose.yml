@@ -1,0 +1,31 @@
+# 247 Web self-host compose (infra-only in Track 1)
+#
+# NOTE: The container will NOT fully boot until Track 2 swaps Neon DB + auth
+# for local SQLite + local auth. Until then, it exits with clear "missing
+# DATABASE_URL / Neon auth env" logs — that is expected, not a misconfig.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "0.0.0.0:3001:3001"
+    volumes:
+      - web-data:/app/data
+    environment:
+      # --- Track 1 placeholders (Track 2 will consume these) ---
+      DATABASE_URL: ${DATABASE_URL:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-}
+      NEXT_PUBLIC_LOCAL_MODE: ${NEXT_PUBLIC_LOCAL_MODE:-true}
+      NODE_ENV: production
+      WEB_DB_PATH: /app/data/web.db
+      # --- Track 2: Neon auth (uncomment when swapping) ---
+      # NEON_AUTH_CLIENT_ID: ${NEON_AUTH_CLIENT_ID:-}
+      # NEON_AUTH_CLIENT_SECRET: ${NEON_AUTH_CLIENT_SECRET:-}
+      # NEON_AUTH_ISSUER: ${NEON_AUTH_ISSUER:-}
+    restart: unless-stopped
+
+volumes:
+  web-data:

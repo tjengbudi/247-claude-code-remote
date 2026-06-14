@@ -11,7 +11,8 @@ import {
   loadConfig,
   getProfilePath,
 } from '../lib/config.js';
-import { ensureDirectories } from '../lib/paths.js';
+import { ensureDirectories, getAgentPaths } from '../lib/paths.js';
+import { setupTmuxResume } from '../lib/tmux-resume.js';
 
 export const initCommand = new Command('init')
   .description('Initialize 247 agent configuration')
@@ -104,6 +105,22 @@ export const initCommand = new Command('init')
 
       const configPath = getProfilePath(profileName);
       console.log(chalk.dim(`  → ${configPath}`));
+
+      // Set up tmux session resume (Linux only)
+      if (process.platform === 'linux') {
+        try {
+          const paths = getAgentPaths();
+          const result = setupTmuxResume(paths.tmuxDir);
+          console.log(chalk.green('  ✓ tmux session resume configured'));
+          if (result.backupPath) {
+            console.log(chalk.dim(`    Backed up existing ~/.tmux.conf to ${result.backupPath}`));
+          }
+        } catch (err) {
+          console.log(chalk.yellow('  ⚠ Failed to configure tmux session resume'));
+          console.log(chalk.dim(`    ${err instanceof Error ? err.message : String(err)}`));
+          console.log(chalk.dim('    You can configure it manually later if needed.'));
+        }
+      }
     } catch (err) {
       configSpinner.fail(`Failed to create configuration: ${(err as Error).message}`);
       process.exit(1);

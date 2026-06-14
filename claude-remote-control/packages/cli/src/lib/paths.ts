@@ -41,6 +41,9 @@ export interface AgentPaths {
 
   /** Is this a development install? */
   isDev: boolean;
+
+  /** tmux plugins and resurrect snapshots (~/.247/tmux) */
+  tmuxDir: string;
 }
 
 let cachedPaths: AgentPaths | null = null;
@@ -91,6 +94,7 @@ export function getAgentPaths(): AgentPaths {
     pidFile: join(configDir, 'agent.pid'),
     nodePath: process.execPath,
     isDev,
+    tmuxDir: join(configDir, 'tmux'),
   };
 
   return cachedPaths;
@@ -102,7 +106,7 @@ export function getAgentPaths(): AgentPaths {
 export function ensureDirectories(): void {
   const paths = getAgentPaths();
 
-  const dirs = [paths.configDir, paths.dataDir, paths.logDir];
+  const dirs = [paths.configDir, paths.dataDir, paths.logDir, paths.tmuxDir];
 
   for (const dir of dirs) {
     if (!existsSync(dir)) {

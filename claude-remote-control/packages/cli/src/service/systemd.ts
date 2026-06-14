@@ -2,6 +2,7 @@ import { existsSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { userInfo } from 'os';
 import type {
   ServiceManager,
   ServiceStatus,
@@ -14,6 +15,7 @@ import { checkTmux } from '../lib/prerequisites.js';
 const execAsync = promisify(exec);
 
 const SERVICE_NAME = '247-agent';
+const TMUX_SERVICE_NAME = '247-tmux';
 
 export class SystemdService implements ServiceManager {
   platform = 'linux' as const;
@@ -21,6 +23,10 @@ export class SystemdService implements ServiceManager {
 
   private get unitPath(): string {
     return join(getTestableHomedir(), '.config', 'systemd', 'user', `${SERVICE_NAME}.service`);
+  }
+
+  private get tmuxUnitPath(): string {
+    return join(getTestableHomedir(), '.config', 'systemd', 'user', `${TMUX_SERVICE_NAME}.service`);
   }
 
   async status(): Promise<ServiceStatus> {
@@ -90,12 +96,16 @@ export class SystemdService implements ServiceManager {
       mkdirSync(logDir, { recursive: true });
     }
 
+    // Generate and install tmux unit (bootstraps tmux server)
+    const tmuxUnitContent = this.generateTmuxUnit();
+    writeFileSync(this.tmuxUnitPath, tmuxUnitContent, 'utf-8');
+
     // Determine entry point
     const entryPoint = paths.isDev
       ? join(paths.agentRoot, 'src', 'index.ts')
       : join(paths.agentRoot, 'dist', 'index.js');
 
-    // Generate unit content
+    // Generate agent unit content (depends on tmux)
     const unitContent = this.generateUnit({
       description: '247 Agent - The Vibe Company',
       nodePath: paths.nodePath,
@@ -118,9 +128,21 @@ export class SystemdService implements ServiceManager {
     // Enable at boot if requested
     if (options.enableAtBoot ?? true) {
       try {
+        await execAsync(`systemctl --user enable ${TMUX_SERVICE_NAME}`);
         await execAsync(`systemctl --user enable ${SERVICE_NAME}`);
       } catch (err) {
         return { success: false, error: `Failed to enable service: ${(err as Error).message}` };
+      }
+
+      // Enable linger (best-effort, warn on failure)
+      try {
+        const user = userInfo().username;
+        await execAsync(`loginctl enable-linger ${user}`);
+      } catch (err) {
+        console.warn(
+          `Warning: Could not enable linger for ${userInfo().username}. ` +
+            `You may need to run: sudo loginctl enable-linger ${userInfo().username}`
+        );
       }
     }
 
@@ -138,7 +160,7 @@ export class SystemdService implements ServiceManager {
   async uninstall(): Promise<ServiceResult> {
     const status = await this.status();
 
-    // Stop and disable first
+    // Stop and disable agent first
     if (status.running) {
       await this.stop();
     }
@@ -150,15 +172,51 @@ export class SystemdService implements ServiceManager {
       }
     }
 
-    // Remove unit file
+    // Remove agent unit file
     if (existsSync(this.unitPath)) {
       try {
         unlinkSync(this.unitPath);
-        await execAsync('systemctl --user daemon-reload');
       } catch (err) {
         return { success: false, error: `Failed to remove unit file: ${(err as Error).message}` };
       }
     }
+
+    // Disable and remove tmux unit
+    try {
+      await execAsync(`systemctl --user disable ${TMUX_SERVICE_NAME}`);
+    } catch {
+      // Ignore disable errors
+    }
+    if (existsSync(this.tmuxUnitPath)) {
+      try {
+        unlinkSync(this.tmuxUnitPath);
+      } catch {
+        // Ignore removal errors
+      }
+    }
+
+    // Remove tmux resume configuration and plugins
+    if (process.platform === 'linux') {
+      const { removeTmuxResume } = await import('../lib/tmux-resume.js');
+      try {
+        removeTmuxResume();
+      } catch {
+        // Non-fatal, continue with uninstall
+      }
+    }
+
+    // Reload systemd
+    try {
+      await execAsync('systemctl --user daemon-reload');
+    } catch {
+      // Ignore reload errors
+    }
+
+    // Print linger notice (don't auto-disable)
+    console.log(
+      `Note: linger is still enabled for ${userInfo().username}. ` +
+        `To disable: sudo loginctl disable-linger ${userInfo().username}`
+    );
 
     return { success: true };
   }
@@ -197,6 +255,22 @@ export class SystemdService implements ServiceManager {
     };
   }
 
+  private generateTmuxUnit(): string {
+    return `[Unit]
+Description=247 tmux server bootstrap
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/env tmux start-server
+ExecStartPost=-/usr/bin/env tmux source-file %h/.tmux.conf
+
+[Install]
+WantedBy=default.target
+`;
+  }
+
   private generateUnit(options: {
     description: string;
     nodePath: string;
@@ -215,7 +289,8 @@ export class SystemdService implements ServiceManager {
 
     return `[Unit]
 Description=${options.description}
-After=network.target
+After=network.target ${TMUX_SERVICE_NAME}.service
+Wants=${TMUX_SERVICE_NAME}.service
 
 [Service]
 Type=simple

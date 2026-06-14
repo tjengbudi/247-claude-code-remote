@@ -52,10 +52,29 @@ export function checkNodeVersion(): PrerequisiteCheck {
 export function checkTmux(): PrerequisiteCheck {
   try {
     const output = execSync('tmux -V', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    const version = output.trim();
+
+    // Parse version (e.g., "tmux 3.3a", "tmux 2.9", "tmux next-3.4")
+    const match = version.match(/tmux (\d+)\.(\d+)/);
+    if (match) {
+      const major = parseInt(match[1], 10);
+      const minor = parseInt(match[2], 10);
+
+      // resurrect requires tmux >= 1.9
+      if (major < 1 || (major === 1 && minor < 9)) {
+        return {
+          name: 'tmux',
+          status: 'warn',
+          message: `${version} (resurrect requires >=1.9)`,
+          required: true,
+        };
+      }
+    }
+
     return {
       name: 'tmux',
       status: 'ok',
-      message: output.trim(),
+      message: version,
       required: true,
     };
   } catch {

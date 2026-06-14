@@ -47,6 +47,15 @@ serviceCommand
           console.log(chalk.green('  Service is now running'));
         }
 
+        // LAN-exposure security warning (Linux only)
+        if (process.platform === 'linux') {
+          console.log();
+          console.log(chalk.yellow.bold('⚠  Security notice'));
+          console.log(chalk.yellow('  Agent binds to 0.0.0.0 without authentication.'));
+          console.log(chalk.yellow('  Restrict access via firewall if exposing to LAN.'));
+          console.log(chalk.dim('  See docs/self-host.md for firewall setup and security guidance.'));
+        }
+
         console.log();
         console.log(chalk.dim('Useful commands:'));
         console.log(chalk.dim('  247 service status  - Check service status'));

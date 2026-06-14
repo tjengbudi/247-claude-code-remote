@@ -28,12 +28,36 @@ export interface UseAgentConnectionsReturn {
   refetch: () => Promise<void>;
 }
 
+const LOCAL_MODE = process.env.NEXT_PUBLIC_LOCAL_MODE === 'true';
+const LOCAL_STORAGE_KEY = '247-local-connections';
+
+function readLocalConnections(): AgentConnection[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as AgentConnection[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalConnections(connections: AgentConnection[]): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(connections));
+}
+
 export function useAgentConnections(): UseAgentConnectionsReturn {
   const [connections, setConnections] = useState<AgentConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchConnections = useCallback(async () => {
+    if (LOCAL_MODE) {
+      setError(null);
+      setConnections(readLocalConnections());
+      setLoading(false);
+      return;
+    }
     try {
       setError(null);
       const res = await fetch('/api/connections');
@@ -76,6 +100,22 @@ export function useAgentConnections(): UseAgentConnectionsReturn {
     method?: string;
     color?: string;
   }): Promise<AgentConnection> => {
+    if (LOCAL_MODE) {
+      const connection: AgentConnection = {
+        id: crypto.randomUUID(),
+        url: data.url,
+        name: data.name,
+        method: (data.method as AgentConnection['method']) || 'localhost',
+        createdAt: Date.now(),
+        color: data.color,
+      };
+      setConnections((prev) => {
+        const next = [...prev, connection];
+        writeLocalConnections(next);
+        return next;
+      });
+      return connection;
+    }
     const res = await fetch('/api/connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -102,6 +142,14 @@ export function useAgentConnections(): UseAgentConnectionsReturn {
   };
 
   const removeConnection = async (id: string): Promise<void> => {
+    if (LOCAL_MODE) {
+      setConnections((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        writeLocalConnections(next);
+        return next;
+      });
+      return;
+    }
     const res = await fetch(`/api/connections/${id}`, { method: 'DELETE' });
 
     if (!res.ok) {
@@ -115,6 +163,25 @@ export function useAgentConnections(): UseAgentConnectionsReturn {
     id: string,
     data: { url?: string; name?: string; method?: string; color?: string }
   ): Promise<AgentConnection> => {
+    if (LOCAL_MODE) {
+      let updated!: AgentConnection;
+      setConnections((prev) => {
+        const next = prev.map((c) => {
+          if (c.id !== id) return c;
+          updated = {
+            ...c,
+            url: data.url ?? c.url,
+            name: data.name ?? c.name,
+            method: (data.method as AgentConnection['method']) ?? c.method,
+            color: data.color ?? c.color,
+          };
+          return updated;
+        });
+        writeLocalConnections(next);
+        return next;
+      });
+      return updated;
+    }
     const res = await fetch(`/api/connections/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
