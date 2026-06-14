@@ -184,10 +184,14 @@ export function saveConfig(config: AgentConfig, profileName?: string | null): vo
  *
  * Secrets (machine.id, dashboard.apiKey) follow generate-once discipline:
  * if `existing` is provided, those values are preserved; only missing
- * secrets are minted. Non-secret fields (machine.name, agent.port,
- * projects.basePath) are always taken from the provided options so that
- * `247 init -f` can overwrite user-facing settings without regenerating
- * the pairing-critical machine.id.
+ * secrets are minted. User-curated non-secret state (projects.whitelist,
+ * editor settings) is also carried forward so a re-init / `247 init -f`
+ * never silently discards it. Only the user-facing settings that `init`
+ * itself accepts as options (machine.name, agent.port, projects.basePath)
+ * are taken from the provided options.
+ *
+ * `existing` is treated as untrusted (a hand-edited or older-format
+ * config can be missing nested keys), so every read is optional-chained.
  */
 export function createConfig(options: {
   machineName: string;
@@ -195,9 +199,11 @@ export function createConfig(options: {
   projectsPath?: string;
   existing?: AgentConfig | null;
 }): AgentConfig {
-  const preservedMachineId = options.existing?.machine.id || randomUUID();
+  const preservedMachineId = options.existing?.machine?.id || randomUUID();
   const preservedApiKey = options.existing?.dashboard?.apiKey || generateAgentAuthToken();
   const preservedApiUrl = options.existing?.dashboard?.apiUrl;
+  const preservedWhitelist = options.existing?.projects?.whitelist ?? [];
+  const preservedEditor = options.existing?.editor ?? DEFAULT_CONFIG.editor;
 
   return {
     ...DEFAULT_CONFIG,
@@ -210,8 +216,9 @@ export function createConfig(options: {
     },
     projects: {
       basePath: options.projectsPath ?? DEFAULT_CONFIG.projects.basePath,
-      whitelist: [],
+      whitelist: preservedWhitelist,
     },
+    editor: preservedEditor,
     dashboard: preservedApiUrl
       ? { apiUrl: preservedApiUrl, apiKey: preservedApiKey }
       : { apiKey: preservedApiKey },

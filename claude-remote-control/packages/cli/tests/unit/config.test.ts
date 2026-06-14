@@ -318,6 +318,49 @@ describe('CLI Config', () => {
       expect(config.dashboard?.apiKey).toBeDefined();
       expect(config.dashboard?.apiKey).toMatch(/^[A-Za-z0-9_-]+$/);
     });
+
+    it('preserves existing projects.whitelist across re-init', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const existing = {
+        machine: { id: 'test-id', name: 'Test' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: ['project-a', 'project-b'] },
+      };
+
+      const config = createConfig({ machineName: 'Test', existing });
+
+      expect(config.projects.whitelist).toEqual(['project-a', 'project-b']);
+    });
+
+    it('preserves existing editor settings across re-init', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const existing = {
+        machine: { id: 'test-id', name: 'Test' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: [] },
+        editor: { enabled: true, portRange: { start: 5000, end: 5010 }, idleTimeout: 60000 },
+      };
+
+      const config = createConfig({ machineName: 'Test', existing });
+
+      expect(config.editor).toEqual({
+        enabled: true,
+        portRange: { start: 5000, end: 5010 },
+        idleTimeout: 60000,
+      });
+    });
+
+    it('does not throw when existing config is missing the machine key', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      // Hand-edited / older-format config with no machine block.
+      const existing = { agent: { port: 4678 } } as never;
+
+      const config = createConfig({ machineName: 'Test', existing });
+
+      // Falls back to a freshly minted id rather than crashing.
+      expect(config.machine.id).toBe('test-uuid-1234');
+      expect(config.machine.name).toBe('Test');
+    });
   });
 
   describe('configExists', () => {
