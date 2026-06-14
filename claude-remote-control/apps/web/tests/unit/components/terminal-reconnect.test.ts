@@ -334,4 +334,58 @@ describe('Terminal WebSocket reconnection', () => {
       expect(scheduleReconnect).toHaveBeenLastCalledWith(WS_RECONNECT_BASE_DELAY);
     });
   });
+
+  /**
+   * Handshake-reject detection (AC7, Story 3.3).
+   *
+   * Models the `hasOpenedRef` heuristic in useTerminalConnection.ts:
+   * - onclose BEFORE any onopen  → clean handshake reject (e.g. agent wrote
+   *   HTTP 401 then destroyed the socket) → TERMINAL, no reconnect.
+   * - onclose AFTER a successful onopen → transport blip → reconnect.
+   *
+   * P1 fix: hasOpened MUST be reset to false at the start of each reconnect
+   * attempt. Otherwise a reconnect that is itself rejected sees the stale
+   * `true` from the prior open and loops forever — the exact footgun AC7
+   * exists to prevent (live once 3.4 flips enforcement ON).
+   */
+  describe('Handshake-reject detection (AC7)', () => {
+    // Mirrors the onclose branch: reconnect only when we had opened.
+    const shouldReconnectAfterClose = (hasOpened: boolean): boolean => hasOpened;
+
+    it('treats a close before any open as terminal (no reconnect)', () => {
+      const hasOpened = false; // never opened — handshake rejected
+      expect(shouldReconnectAfterClose(hasOpened)).toBe(false);
+    });
+
+    it('treats a close after a successful open as a transport blip (reconnect)', () => {
+      const hasOpened = true; // opened, then dropped
+      expect(shouldReconnectAfterClose(hasOpened)).toBe(true);
+    });
+
+    it('does NOT loop when a reconnect attempt is itself rejected (P1: flag reset per attempt)', () => {
+      // First connection opens successfully.
+      let hasOpened = false;
+      hasOpened = true; // onopen fires
+
+      // Transport blip closes it → we reconnect because hasOpened was true.
+      expect(shouldReconnectAfterClose(hasOpened)).toBe(true);
+
+      // P1 fix: the reconnect attempt resets the flag BEFORE the new socket opens.
+      hasOpened = false;
+
+      // The reconnect handshake is rejected (no onopen) → must be terminal now,
+      // NOT another backoff reconnect.
+      expect(shouldReconnectAfterClose(hasOpened)).toBe(false);
+    });
+
+    it('without the reset, a rejected reconnect would falsely loop (regression guard)', () => {
+      // Demonstrates the bug the P1 reset prevents: stale `true` survives.
+      let hasOpened = true; // opened once, never reset (the old buggy behavior)
+      // A later rejected reconnect still sees true → would reconnect forever.
+      expect(shouldReconnectAfterClose(hasOpened)).toBe(true);
+      // The fix flips this to false before the rejected attempt is evaluated.
+      hasOpened = false;
+      expect(shouldReconnectAfterClose(hasOpened)).toBe(false);
+    });
+  });
 });

@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { cn, buildWebSocketUrl, stripProtocol } from '@/lib/utils';
+import { openAgentWebSocket } from '@/lib/ws-token';
 
 // Old storage key (for migration)
 const OLD_STORAGE_KEY = 'agentConnection';
@@ -452,7 +453,8 @@ export function AgentConnectionSettings({
 
     try {
       const wsUrl = buildWebSocketUrl(url, '/terminal?project=test&session=test-connection');
-      const ws = new WebSocket(wsUrl);
+      // Connection test site: token undefined — correct under enforcement-OFF (no connection row exists yet).
+      const ws = openAgentWebSocket(wsUrl);
 
       const timeout = setTimeout(() => {
         ws.close();

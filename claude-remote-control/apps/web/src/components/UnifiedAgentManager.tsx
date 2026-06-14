@@ -24,6 +24,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { cn, buildWebSocketUrl, stripProtocol } from '@/lib/utils';
+import { openAgentWebSocket } from '@/lib/ws-token';
 import type { StoredAgentConnection } from './AgentConnectionSettings';
 import { EditAgentModal } from './EditAgentModal';
 
@@ -366,7 +367,8 @@ function AddAgentForm({
     setTestState('testing');
     try {
       const wsUrl = buildWebSocketUrl(fullUrl, '/terminal?project=test&session=test-connection');
-      const ws = new WebSocket(wsUrl);
+      // Connection test site: token undefined — correct under enforcement-OFF (no connection row exists yet).
+      const ws = openAgentWebSocket(wsUrl);
 
       const timeout = setTimeout(() => {
         ws.close();

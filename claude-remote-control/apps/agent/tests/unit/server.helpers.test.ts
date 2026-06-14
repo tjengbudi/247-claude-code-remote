@@ -1,301 +1,194 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-describe('Server Helpers', () => {
-  describe('generateSessionName', () => {
-    // Since generateSessionName is not exported, we test its behavior through integration
-    // But we can test the pattern validation
-    const SESSION_NAME_PATTERN = /^[\w-]+--[a-z]+-[a-z]+-\d+$/;
+// URL-safe base64 token, representative of what Story 3.1 produces.
+const API_KEY = 'aGVsbG93b3JsZHRoaXNpc3Rlc3R0b2tlbjEyMzQ1Njc4OTAxMg';
 
-    it('validates session name format', () => {
-      // Valid names
-      expect('my-project--brave-lion-42').toMatch(SESSION_NAME_PATTERN);
-      expect('test--swift-hawk-0').toMatch(SESSION_NAME_PATTERN);
-      expect('project_name--calm-wolf-99').toMatch(SESSION_NAME_PATTERN);
+async function loadServerHelpers(apiKey: string | undefined, enforce: boolean) {
+  vi.resetModules();
+  vi.doMock('../../src/config.js', () => ({
+    config: {
+      machine: { id: 'test-machine-id', name: 'Test Machine' },
+      agent: { port: 4678, url: 'localhost:4678' },
+      dashboard: apiKey !== undefined ? { apiUrl: 'http://localhost:3001/api', apiKey } : undefined,
+      projects: { basePath: '~/Dev', whitelist: [] },
+    },
+  }));
+  if (enforce) {
+    process.env.AGENT_TOKEN_ENFORCE = 'true';
+  } else {
+    delete process.env.AGENT_TOKEN_ENFORCE;
+  }
+  return import('../../src/server.js');
+}
 
-      // Invalid names
-      expect('invalid-name').not.toMatch(SESSION_NAME_PATTERN);
-      expect('project-brave-lion-42').not.toMatch(SESSION_NAME_PATTERN);
-      expect('project--BraveLion-42').not.toMatch(SESSION_NAME_PATTERN);
+beforeEach(() => {
+  vi.resetModules();
+  delete process.env.AGENT_TOKEN_ENFORCE;
+});
+
+afterEach(() => {
+  delete process.env.AGENT_TOKEN_ENFORCE;
+});
+
+describe('extractTokenFromProtocol', () => {
+  it('extracts token from comma-separated string header', async () => {
+    const { extractTokenFromProtocol } = await loadServerHelpers(API_KEY, false);
+    const req = { headers: { 'sec-websocket-protocol': '247, my-token-value' } };
+    expect(extractTokenFromProtocol(req)).toBe('my-token-value');
+  });
+
+  it('extracts token from array header', async () => {
+    const { extractTokenFromProtocol } = await loadServerHelpers(API_KEY, false);
+    const req = { headers: { 'sec-websocket-protocol': ['247', 'my-token'] } };
+    expect(extractTokenFromProtocol(req)).toBe('my-token');
+  });
+
+  it('returns undefined when header absent', async () => {
+    const { extractTokenFromProtocol } = await loadServerHelpers(API_KEY, false);
+    expect(extractTokenFromProtocol({ headers: {} })).toBeUndefined();
+  });
+
+  it('returns undefined when only "247" offered', async () => {
+    const { extractTokenFromProtocol } = await loadServerHelpers(API_KEY, false);
+    const req = { headers: { 'sec-websocket-protocol': '247' } };
+    expect(extractTokenFromProtocol(req)).toBeUndefined();
+  });
+
+  it('trims whitespace from token', async () => {
+    const { extractTokenFromProtocol } = await loadServerHelpers(API_KEY, false);
+    const req = { headers: { 'sec-websocket-protocol': '247,   spaced-token   ' } };
+    expect(extractTokenFromProtocol(req)).toBe('spaced-token');
+  });
+
+  it('extracts a token whose value is literally "247" (position-based, not value-based)', async () => {
+    const { extractTokenFromProtocol } = await loadServerHelpers(API_KEY, false);
+    const req = { headers: { 'sec-websocket-protocol': '247, 247' } };
+    // The element AFTER the "247" marker is the token, even if it equals "247".
+    expect(extractTokenFromProtocol(req)).toBe('247');
+  });
+
+  it('takes the element following the "247" marker, not a stray leading element', async () => {
+    const { extractTokenFromProtocol } = await loadServerHelpers(API_KEY, false);
+    const req = { headers: { 'sec-websocket-protocol': ['247', 'real-token', 'extra'] } };
+    expect(extractTokenFromProtocol(req)).toBe('real-token');
+  });
+
+  it('returns undefined when "247" marker is absent even if other elements exist', async () => {
+    const { extractTokenFromProtocol } = await loadServerHelpers(API_KEY, false);
+    const req = { headers: { 'sec-websocket-protocol': 'garbage, more-garbage' } };
+    expect(extractTokenFromProtocol(req)).toBeUndefined();
+  });
+});
+
+describe('selectSubprotocol', () => {
+  it('echoes "247" when offered (AC3)', async () => {
+    const { selectSubprotocol } = await loadServerHelpers(API_KEY, false);
+    expect(selectSubprotocol(new Set(['247', 'some-token']))).toBe('247');
+  });
+
+  it('never echoes the token element', async () => {
+    const { selectSubprotocol } = await loadServerHelpers(API_KEY, false);
+    const result = selectSubprotocol(new Set(['247', 'secret-token']));
+    expect(result).toBe('247');
+    expect(result).not.toBe('secret-token');
+  });
+
+  it('returns false when "247" not offered', async () => {
+    const { selectSubprotocol } = await loadServerHelpers(API_KEY, false);
+    expect(selectSubprotocol(new Set(['some-token']))).toBe(false);
+  });
+
+  it('returns false for an empty protocol set', async () => {
+    const { selectSubprotocol } = await loadServerHelpers(API_KEY, false);
+    expect(selectSubprotocol(new Set())).toBe(false);
+  });
+});
+
+describe('shouldAcceptUpgrade', () => {
+  describe('enforcement OFF (default)', () => {
+    it('accepts when token matches', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, false);
+      expect(shouldAcceptUpgrade(API_KEY)).toBe(true);
     });
 
-    it('extracts project from session name', () => {
-      const extractProject = (sessionName: string) => {
-        const parts = sessionName.split('--');
-        return parts[0];
-      };
+    it('accepts when token is missing', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, false);
+      expect(shouldAcceptUpgrade(undefined)).toBe(true);
+    });
 
-      expect(extractProject('my-project--brave-lion-42')).toBe('my-project');
-      expect(extractProject('test--swift-hawk-0')).toBe('test');
-      expect(extractProject('project_with_underscore--calm-wolf-99')).toBe(
-        'project_with_underscore'
-      );
+    it('accepts when token is wrong', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, false);
+      expect(shouldAcceptUpgrade('wrong-token')).toBe(true);
+    });
+
+    it('accepts when no apiKey provisioned', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(undefined, false);
+      expect(shouldAcceptUpgrade('any-token')).toBe(true);
     });
   });
 
-  describe('HookStatus state machine', () => {
-    type HookStatus = 'running' | 'waiting' | 'stopped' | 'ended' | 'permission';
-
-    // Test status transitions
-    const VALID_TRANSITIONS: Record<HookStatus, HookStatus[]> = {
-      running: ['waiting', 'stopped', 'ended', 'permission'],
-      waiting: ['running', 'stopped', 'ended'],
-      stopped: ['running', 'ended'],
-      ended: [], // Terminal state
-      permission: ['running', 'stopped', 'ended'],
-    };
-
-    it.each([
-      ['running', 'waiting', true],
-      ['running', 'stopped', true],
-      ['running', 'ended', true],
-      ['running', 'permission', true],
-      ['waiting', 'running', true],
-      ['waiting', 'stopped', true],
-      ['stopped', 'running', true],
-      ['ended', 'running', false], // Can't restart ended session
-      ['permission', 'running', true],
-    ] as const)(
-      'validates transition from %s to %s is %s',
-      (from, to, isValid) => {
-        const validTargets = VALID_TRANSITIONS[from];
-        expect(validTargets.includes(to)).toBe(isValid);
-      }
-    );
-  });
-
-  describe('Hook event parsing', () => {
-    interface HookEvent {
-      event: string;
-      session_id?: string;
-      tmux_session?: string;
-      project?: string;
-      tool_name?: string;
-      stop_reason?: string;
-    }
-
-    const parseHookEvent = (event: HookEvent) => {
-      const statusMap: Record<string, string> = {
-        SessionStart: 'running',
-        PreToolUse: 'running',
-        PostToolUse: 'running',
-        PermissionRequest: 'permission',
-        Stop: 'stopped',
-        SessionEnd: 'ended',
-      };
-
-      return {
-        status: statusMap[event.event] || 'running',
-        lastEvent: event.event,
-        toolName: event.tool_name,
-        stopReason: event.stop_reason,
-      };
-    };
-
-    it.each([
-      ['SessionStart', 'running'],
-      ['PreToolUse', 'running'],
-      ['PostToolUse', 'running'],
-      ['PermissionRequest', 'permission'],
-      ['Stop', 'stopped'],
-      ['SessionEnd', 'ended'],
-    ])('maps %s event to %s status', (event, expectedStatus) => {
-      const result = parseHookEvent({ event });
-      expect(result.status).toBe(expectedStatus);
-      expect(result.lastEvent).toBe(event);
+  describe('enforcement ON', () => {
+    it('accepts when token matches', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, true);
+      expect(shouldAcceptUpgrade(API_KEY)).toBe(true);
     });
 
-    it('extracts tool name from event', () => {
-      const result = parseHookEvent({
-        event: 'PreToolUse',
-        tool_name: 'Bash',
-      });
-      expect(result.toolName).toBe('Bash');
+    it('rejects when token is missing', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, true);
+      expect(shouldAcceptUpgrade(undefined)).toBe(false);
     });
 
-    it('extracts stop reason from event', () => {
-      const result = parseHookEvent({
-        event: 'Stop',
-        stop_reason: 'user_interrupt',
-      });
-      expect(result.stopReason).toBe('user_interrupt');
+    it('rejects when token is wrong', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, true);
+      expect(shouldAcceptUpgrade('wrong-token')).toBe(false);
+    });
+
+    it('accepts when no apiKey provisioned (nothing to enforce)', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(undefined, true);
+      expect(shouldAcceptUpgrade('any-token')).toBe(true);
     });
   });
+});
 
-  describe('Project whitelist validation', () => {
-    const validateProject = (project: string, whitelist: string[]) => {
-      // Empty whitelist allows any project
-      if (whitelist.length === 0) return true;
-      return whitelist.includes(project);
+describe('rejectUpgrade', () => {
+  it('writes HTTP 401 line then destroys socket', async () => {
+    const { rejectUpgrade } = await loadServerHelpers(API_KEY, false);
+    const writes: string[] = [];
+    let destroyed = false;
+    const socket = {
+      write: (data: string) => { writes.push(data); },
+      destroy: () => { destroyed = true; },
     };
 
-    it('allows any project with empty whitelist', () => {
-      expect(validateProject('any-project', [])).toBe(true);
-      expect(validateProject('another-project', [])).toBe(true);
-    });
+    rejectUpgrade(socket);
 
-    it('allows whitelisted projects', () => {
-      const whitelist = ['project-a', 'project-b'];
-      expect(validateProject('project-a', whitelist)).toBe(true);
-      expect(validateProject('project-b', whitelist)).toBe(true);
-    });
-
-    it('rejects non-whitelisted projects', () => {
-      const whitelist = ['project-a', 'project-b'];
-      expect(validateProject('project-c', whitelist)).toBe(false);
-      expect(validateProject('malicious', whitelist)).toBe(false);
-    });
+    expect(writes).toEqual(['HTTP/1.1 401 Unauthorized\r\n\r\n']);
+    expect(destroyed).toBe(true);
   });
 
-  describe('WebSocket message parsing', () => {
-    interface WSMessage {
-      type: string;
-      data?: string;
-      cols?: number;
-      rows?: number;
-      lines?: number;
-    }
-
-    const parseWSMessage = (data: string): WSMessage | null => {
-      try {
-        return JSON.parse(data);
-      } catch {
-        return null;
-      }
+  it('writes before destroying (socket.write called first)', async () => {
+    const { rejectUpgrade } = await loadServerHelpers(API_KEY, false);
+    const callOrder: string[] = [];
+    const socket = {
+      write: () => { callOrder.push('write'); },
+      destroy: () => { callOrder.push('destroy'); },
     };
 
-    it('parses input message', () => {
-      const msg = parseWSMessage('{"type":"input","data":"ls -la"}');
-      expect(msg).toEqual({ type: 'input', data: 'ls -la' });
-    });
+    rejectUpgrade(socket);
 
-    it('parses resize message', () => {
-      const msg = parseWSMessage('{"type":"resize","cols":120,"rows":40}');
-      expect(msg).toEqual({ type: 'resize', cols: 120, rows: 40 });
-    });
-
-    it('parses ping message', () => {
-      const msg = parseWSMessage('{"type":"ping"}');
-      expect(msg).toEqual({ type: 'ping' });
-    });
-
-    it('parses start-claude message', () => {
-      const msg = parseWSMessage('{"type":"start-claude"}');
-      expect(msg).toEqual({ type: 'start-claude' });
-    });
-
-    it('parses request-history message', () => {
-      const msg = parseWSMessage('{"type":"request-history","lines":100}');
-      expect(msg).toEqual({ type: 'request-history', lines: 100 });
-    });
-
-    it('returns null for invalid JSON', () => {
-      expect(parseWSMessage('not json')).toBeNull();
-      expect(parseWSMessage('')).toBeNull();
-      expect(parseWSMessage('{invalid}')).toBeNull();
-    });
+    expect(callOrder).toEqual(['write', 'destroy']);
   });
 
-  describe('Session status detection', () => {
-    interface SessionInfo {
-      hookStatus?: {
-        status: string;
-        lastActivity: number;
-      };
-      output?: string;
-    }
-
-    const HOOK_STATUS_TTL = 30 * 1000; // 30 seconds
-
-    const getSessionStatus = (session: SessionInfo, now: number) => {
-      // Prefer hook status if fresh
-      if (session.hookStatus) {
-        const age = now - session.hookStatus.lastActivity;
-        if (age < HOOK_STATUS_TTL) {
-          return {
-            status: session.hookStatus.status,
-            source: 'hook' as const,
-          };
-        }
-      }
-
-      // Fall back to output heuristics
-      if (session.output) {
-        if (session.output.includes('Bash')) {
-          return { status: 'running', source: 'heuristic' as const };
-        }
-        if (session.output.includes('>')) {
-          return { status: 'waiting', source: 'heuristic' as const };
-        }
-      }
-
-      return { status: 'unknown', source: 'none' as const };
+  it('still destroys the socket when write throws (half-closed socket)', async () => {
+    const { rejectUpgrade } = await loadServerHelpers(API_KEY, false);
+    let destroyed = false;
+    const socket = {
+      write: () => { throw new Error('socket already closed'); },
+      destroy: () => { destroyed = true; },
     };
 
-    it('uses hook status when fresh', () => {
-      const now = Date.now();
-      const session: SessionInfo = {
-        hookStatus: {
-          status: 'running',
-          lastActivity: now - 5000, // 5 seconds ago
-        },
-      };
-
-      const result = getSessionStatus(session, now);
-      expect(result.status).toBe('running');
-      expect(result.source).toBe('hook');
-    });
-
-    it('ignores stale hook status', () => {
-      const now = Date.now();
-      const session: SessionInfo = {
-        hookStatus: {
-          status: 'running',
-          lastActivity: now - 60000, // 60 seconds ago
-        },
-        output: 'Bash command',
-      };
-
-      const result = getSessionStatus(session, now);
-      expect(result.source).toBe('heuristic');
-    });
-
-    it('falls back to heuristics without hook status', () => {
-      const session: SessionInfo = {
-        output: '$ ls\nfile.txt\n> ',
-      };
-
-      const result = getSessionStatus(session, Date.now());
-      expect(result.source).toBe('heuristic');
-      expect(result.status).toBe('waiting');
-    });
-
-    it('returns unknown with no data', () => {
-      const session: SessionInfo = {};
-      const result = getSessionStatus(session, Date.now());
-      expect(result.status).toBe('unknown');
-      expect(result.source).toBe('none');
-    });
-  });
-
-  describe('Project path resolution', () => {
-    const resolveProjectPath = (basePath: string, project: string) => {
-      const resolved = basePath.replace('~', process.env.HOME || '/home/user');
-      return `${resolved}/${project}`;
-    };
-
-    it('resolves ~ to HOME', () => {
-      const originalHome = process.env.HOME;
-      process.env.HOME = '/home/testuser';
-
-      const path = resolveProjectPath('~/projects', 'my-app');
-      expect(path).toBe('/home/testuser/projects/my-app');
-
-      process.env.HOME = originalHome;
-    });
-
-    it('handles absolute paths', () => {
-      const path = resolveProjectPath('/var/projects', 'my-app');
-      expect(path).toBe('/var/projects/my-app');
-    });
+    // write() throwing must propagate, but destroy() must still have run.
+    expect(() => rejectUpgrade(socket)).toThrow('socket already closed');
+    expect(destroyed).toBe(true);
   });
 });

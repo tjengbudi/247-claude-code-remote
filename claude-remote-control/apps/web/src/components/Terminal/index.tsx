@@ -13,6 +13,7 @@ import { MinimalSessionHeader } from '@/components/MinimalSessionHeader';
 
 interface TerminalProps {
   agentUrl: string;
+  agentToken?: string;
   project: string;
   sessionName?: string;
   environmentId?: string;
@@ -30,6 +31,7 @@ interface TerminalProps {
 
 export function Terminal({
   agentUrl,
+  agentToken,
   project,
   sessionName,
   environmentId,
@@ -71,6 +73,7 @@ export function Terminal({
   } = useTerminalConnection({
     terminalRef,
     agentUrl,
+    token: agentToken,
     project,
     sessionName: effectiveSessionName,
     environmentId,

@@ -13,6 +13,7 @@ export interface AgentConnection {
   isCloud?: boolean;
   cloudAgentId?: string;
   color?: string;
+  token?: string;
 }
 
 export interface UseAgentConnectionsReturn {
@@ -81,6 +82,7 @@ export function useAgentConnections(): UseAgentConnectionsReturn {
           isCloud: c.isCloud as boolean | undefined,
           cloudAgentId: c.cloudAgentId as string | undefined,
           color: c.color as string | undefined,
+          token: c.token as string | undefined,
         }))
       );
     } catch (err) {
@@ -136,6 +138,7 @@ export function useAgentConnections(): UseAgentConnectionsReturn {
       isCloud: raw.isCloud,
       cloudAgentId: raw.cloudAgentId,
       color: raw.color,
+      token: raw.token,
     };
     setConnections((prev) => [...prev, connection]);
     return connection;
@@ -202,6 +205,7 @@ export function useAgentConnections(): UseAgentConnectionsReturn {
       isCloud: raw.isCloud,
       cloudAgentId: raw.cloudAgentId,
       color: raw.color,
+      token: raw.token,
     };
     setConnections((prev) => prev.map((c) => (c.id === id ? connection : c)));
     return connection;

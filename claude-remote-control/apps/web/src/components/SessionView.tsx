@@ -17,6 +17,7 @@ interface SessionViewProps {
   sessionName: string;
   project: string;
   agentUrl: string;
+  agentToken?: string;
   sessionInfo?: SessionInfo;
   environmentId?: string;
   planningProjectId?: string;
@@ -35,6 +36,7 @@ export function SessionView({
   sessionName,
   project,
   agentUrl,
+  agentToken,
   sessionInfo,
   environmentId,
   planningProjectId,
@@ -68,6 +70,7 @@ export function SessionView({
     <Terminal
       key={terminalKey}
       agentUrl={agentUrl}
+      agentToken={agentToken}
       project={project}
       sessionName={isNewSession ? undefined : sessionName}
       environmentId={environmentId}

@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { SessionInfo, SessionWithMachine } from '@/lib/types';
 import { buildWebSocketUrl, buildApiUrl } from '@/lib/utils';
+import { openAgentWebSocket } from '@/lib/ws-token';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { wsLogger, pollingLogger, archivedLogger } from '@/lib/logger';
 import type { WSSessionsMessageFromAgent } from '247-shared';
@@ -22,6 +23,7 @@ export interface Machine {
   config?: {
     projects: string[];
     agentUrl?: string;
+    token?: string;
   };
 }
 
@@ -101,6 +103,7 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
   const wsReconnectDelaysRef = useRef<Map<string, number>>(new Map());
   const wsReconnectTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const activeReconnectionsRef = useRef<Set<string>>(new Set()); // Track machines currently reconnecting
+  const wsHasOpenedRef = useRef<Set<string>>(new Set()); // Track machines where WS successfully opened
   const onNeedsAttentionRef = useRef<((sessionName: string) => void) | undefined>(undefined);
 
   const setOnNeedsAttention = useCallback(
@@ -289,11 +292,15 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
       wsLogger.info(`Connecting to ${wsUrl} for machine ${machine.name}`);
 
       try {
-        const ws = new WebSocket(wsUrl);
+        // Reset hasOpened flag for this connection attempt (critical for handshake-reject detection)
+        wsHasOpenedRef.current.delete(machine.id);
+
+        const ws = openAgentWebSocket(wsUrl, machine.config?.token);
         wsConnectionsRef.current.set(machine.id, ws);
 
         ws.onopen = () => {
           wsLogger.info(`Connected to ${machine.name}`);
+          wsHasOpenedRef.current.add(machine.id); // Mark that this connection successfully opened
           wsReconnectDelaysRef.current.set(machine.id, WS_RECONNECT_BASE_DELAY);
           wsConnectedRef.current.add(machine.id); // Track via ref for polling
 
@@ -413,6 +420,25 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
             }
             return next;
           });
+
+          // If connection never opened, this is a handshake rejection (e.g., 401)
+          // Don't retry - the agent rejected the connection
+          if (!wsHasOpenedRef.current.has(machine.id)) {
+            wsLogger.warn(`Connection rejected by ${machine.name} (never opened), skipping reconnection`);
+            setSessionsByMachine((prev) => {
+              const next = new Map(prev);
+              const existingData = next.get(machine.id);
+              if (existingData) {
+                next.set(machine.id, {
+                  ...existingData,
+                  wsConnected: false,
+                  error: 'Connection rejected by agent (authentication or configuration error)'
+                });
+              }
+              return next;
+            });
+            return;
+          }
 
           // Schedule reconnection with exponential backoff
           // Limit concurrent reconnections to prevent resource exhaustion

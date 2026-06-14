@@ -15,6 +15,7 @@ import {
   WS_ACTIVITY_PAUSE,
 } from '../constants';
 import { buildWebSocketUrl } from '@/lib/utils';
+import { openAgentWebSocket } from '@/lib/ws-token';
 import { terminalLogger } from '@/lib/logger';
 
 interface UseTerminalConnectionProps {
@@ -29,6 +30,8 @@ interface UseTerminalConnectionProps {
   onCopySuccess: () => void;
   /** Mobile mode - use smaller font and handle orientation changes */
   isMobile?: boolean;
+  /** Agent-auth token (URL-safe base64) — forwarded via Sec-WebSocket-Protocol. May be undefined for pre-3.2 rows or LOCAL_MODE. */
+  token?: string;
 }
 
 export function useTerminalConnection({
@@ -41,6 +44,7 @@ export function useTerminalConnection({
   onSessionCreated,
   onCopySuccess,
   isMobile = false,
+  token,
 }: UseTerminalConnectionProps) {
   const [connected, setConnected] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -69,6 +73,9 @@ export function useTerminalConnection({
 
   // Track if we've acknowledged this session (reset needs_attention on first input)
   const hasAcknowledgedRef = useRef<boolean>(false);
+
+  // Track if WebSocket ever successfully opened (for 401 reject detection)
+  const hasOpenedRef = useRef<boolean>(false);
 
   const scrollToBottom = useCallback(() => {
     xtermRef.current?.scrollToBottom();
@@ -368,7 +375,7 @@ export function useTerminalConnection({
       if (isNewSession) wsUrl += '&create=true';
       if (planningProjectId) wsUrl += `&planningProjectId=${encodeURIComponent(planningProjectId)}`;
 
-      ws = new WebSocket(wsUrl);
+      ws = openAgentWebSocket(wsUrl, token);
       wsRef.current = ws;
       const currentTerm = term;
       const currentWs = ws;
@@ -423,6 +430,7 @@ export function useTerminalConnection({
 
       currentWs.onopen = () => {
         if (cancelled) return;
+        hasOpenedRef.current = true;
         setConnected(true);
         setConnectionState('connected');
         reconnectDelayRef.current = WS_RECONNECT_BASE_DELAY;
@@ -480,6 +488,21 @@ export function useTerminalConnection({
           return;
         }
 
+        // Handshake-reject detection (AC7, Story 3.3):
+        // If onclose fires BEFORE any onopen, this is a clean handshake reject
+        // (e.g. agent wrote HTTP 401 then destroyed the socket — surfaces as
+        // abnormal close code 1006 with no prior onopen). Treat as TERMINAL —
+        // do NOT schedule exponential-backoff reconnect, which would loop forever
+        // under enforcement ON. A close AFTER a successful open is a transport
+        // blip and SHOULD still reconnect (existing behavior).
+        // Dormant under enforcement-OFF (no rejects happen); must be correct
+        // now so 3.4's flag flip doesn't introduce a reconnect storm.
+        if (!hasOpenedRef.current) {
+          setConnectionState('disconnected');
+          currentTerm.write('\r\n\x1b[31m* Connection rejected — auth or agent unreachable\x1b[0m\r\n');
+          return;
+        }
+
         setConnectionState('disconnected');
         currentTerm.write('\r\n\x1b[38;5;245m-- Disconnected --\x1b[0m\r\n');
 
@@ -491,13 +514,20 @@ export function useTerminalConnection({
           setConnectionState('reconnecting');
           isReconnectRef.current = true;
 
+          // Reset hasOpened for THIS attempt (mirrors SessionPollingContext:296).
+          // Without this, a reconnect that is itself handshake-rejected (e.g. 3.4
+          // flips enforcement ON mid-session, or the token is rotated/revoked) would
+          // see the stale `true` from the prior open, skip the terminal-reject branch
+          // above, and loop on exponential backoff forever — the exact AC7 footgun.
+          hasOpenedRef.current = false;
+
           let newWsUrl = buildWebSocketUrl(
             agentUrl,
             `/terminal?project=${encodeURIComponent(project)}&session=${encodeURIComponent(sessionName)}`
           );
           if (environmentId) newWsUrl += `&environment=${encodeURIComponent(environmentId)}`;
 
-          const newWs = new WebSocket(newWsUrl);
+          const newWs = openAgentWebSocket(newWsUrl, token);
           ws = newWs;
           wsRef.current = newWs;
           newWs.onopen = currentWs.onopen;
