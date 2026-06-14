@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db, pushSubscription } from '@/lib/db';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 /**
  * POST /api/push/subscribe
@@ -71,7 +71,12 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'Endpoint required' }, { status: 400 });
     }
 
-    await db.delete(pushSubscription).where(eq(pushSubscription.endpoint, endpoint));
+    // Scope delete to the authenticated user so one user cannot unsubscribe
+    // another user's endpoint (endpoint is globally UNIQUE, so id alone is not
+    // owner-safe).
+    await db
+      .delete(pushSubscription)
+      .where(and(eq(pushSubscription.endpoint, endpoint), eq(pushSubscription.userId, user.id)));
 
     return NextResponse.json({ success: true });
   } catch (error) {

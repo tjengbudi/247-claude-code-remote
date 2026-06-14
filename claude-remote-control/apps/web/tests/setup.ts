@@ -22,29 +22,60 @@ function createStorageMock() {
   } as Storage;
 }
 
-if (
-  !('localStorage' in window) ||
-  !window.localStorage ||
-  typeof window.localStorage.getItem !== 'function'
-) {
-  Object.defineProperty(window, 'localStorage', {
+// Guard: browser-only setup (storage, matchMedia, Notification) only applies
+// when window exists (happy-dom). Route handler tests override to node env
+// via `// @vitest-environment node` docblock — window is undefined there.
+if (typeof window !== 'undefined') {
+  if (
+    !('localStorage' in window) ||
+    !window.localStorage ||
+    typeof window.localStorage.getItem !== 'function'
+  ) {
+    Object.defineProperty(window, 'localStorage', {
+      writable: true,
+      value: createStorageMock(),
+    });
+  }
+
+  if (
+    !('sessionStorage' in window) ||
+    !window.sessionStorage ||
+    typeof window.sessionStorage.getItem !== 'function'
+  ) {
+    Object.defineProperty(window, 'sessionStorage', {
+      writable: true,
+      value: createStorageMock(),
+    });
+  }
+
+  // Mock window.matchMedia
+  Object.defineProperty(window, 'matchMedia', {
     writable: true,
-    value: createStorageMock(),
+    value: vi.fn().mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+
+  // Mock Notification API
+  Object.defineProperty(window, 'Notification', {
+    writable: true,
+    value: class MockNotification {
+      static permission = 'default';
+      static requestPermission = vi.fn().mockResolvedValue('granted');
+      constructor() {}
+      close = vi.fn();
+    },
   });
 }
 
-if (
-  !('sessionStorage' in window) ||
-  !window.sessionStorage ||
-  typeof window.sessionStorage.getItem !== 'function'
-) {
-  Object.defineProperty(window, 'sessionStorage', {
-    writable: true,
-    value: createStorageMock(),
-  });
-}
-
-// Mock Next.js router
+// Mock Next.js router (works in any env — vi.mock is env-agnostic)
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
     push: vi.fn(),
@@ -55,29 +86,3 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/',
   useSearchParams: () => new URLSearchParams(),
 }));
-
-// Mock window.matchMedia
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: vi.fn().mockImplementation((query) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
-});
-
-// Mock Notification API
-Object.defineProperty(window, 'Notification', {
-  writable: true,
-  value: class MockNotification {
-    static permission = 'default';
-    static requestPermission = vi.fn().mockResolvedValue('granted');
-    constructor() {}
-    close = vi.fn();
-  },
-});

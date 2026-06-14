@@ -198,6 +198,77 @@ describe('Database Driver (better-sqlite3)', () => {
     });
   });
 
+  describe('user_settings round-trip (AC3)', () => {
+    /**
+     * user_settings has NO API route or app consumer in apps/web/src today
+     * (only schema.ts references it). Route-level E2E is impossible, so this
+     * DB-layer integration test is the correct substitute. This is a
+     * pre-existing condition, NOT an Epic 1 regression.
+     */
+    it('inserts, reads, and updates a setting row', async () => {
+      const dbPath = join(tempDir, 'settings-test.db');
+      process.env.WEB_DB_PATH = dbPath;
+
+      const { getDb, userSettings } = await import('@/lib/db');
+      const { eq } = await import('drizzle-orm');
+      const db = getDb();
+
+      // Insert
+      await db.insert(userSettings).values({
+        id: 'setting-1',
+        userId: 'user-1',
+        key: 'theme',
+        value: 'dark',
+      });
+
+      // Read
+      const [row] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.id, 'setting-1'));
+      expect(row).toBeDefined();
+      expect(row.key).toBe('theme');
+      expect(row.value).toBe('dark');
+
+      // Update
+      await db
+        .update(userSettings)
+        .set({ value: 'light', updatedAt: new Date() })
+        .where(eq(userSettings.id, 'setting-1'));
+
+      const [updated] = await db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.id, 'setting-1'));
+      expect(updated.value).toBe('light');
+    });
+
+    it('rejects duplicate (userId, key) via UNIQUE index', async () => {
+      const dbPath = join(tempDir, 'settings-unique-test.db');
+      process.env.WEB_DB_PATH = dbPath;
+
+      const { getDb, userSettings } = await import('@/lib/db');
+      const db = getDb();
+
+      await db.insert(userSettings).values({
+        id: 'setting-a',
+        userId: 'user-1',
+        key: 'lang',
+        value: 'en',
+      });
+
+      // Second insert with same (userId, key) must fail
+      await expect(
+        db.insert(userSettings).values({
+          id: 'setting-b',
+          userId: 'user-1',
+          key: 'lang',
+          value: 'fr',
+        })
+      ).rejects.toThrow(/UNIQUE/i);
+    });
+  });
+
   describe('Migration safety', () => {
     it('tables exist after getDb() on fresh file', async () => {
       const dbPath = join(tempDir, 'migration-test.db');
