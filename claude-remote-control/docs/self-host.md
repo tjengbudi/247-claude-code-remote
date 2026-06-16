@@ -340,6 +340,41 @@ Kombinasi mitigasi ini memberikan perlindungan memadai untuk postur Track 2 tanp
 
 Pastikan nilai yang Anda set menunjuk ke dashboard lokal/LAN Anda, bukan domain publik.
 
+### Agent Token Enforcement (Story 3.4)
+
+**Enforcement ON secara default.** Agent menolak koneksi WebSocket yang tidak menyertakan token autentikasi yang valid, **kecuali** Anda secara eksplisit menonaktifkannya via environment variable.
+
+**Cara kerja:**
+- `AGENT_TOKEN_ENFORCE` default = ON (secure-by-default)
+- Untuk menonaktifkan sementara (testing/legacy): set `AGENT_TOKEN_ENFORCE=false`
+- Token dikirim via header `Sec-WebSocket-Protocol` sebagai subprotocol kedua setelah `"247"`
+- Koneksi tanpa token valid → HTTP 401 Unauthorized sebelum socket di-destroy
+
+**Pre-flip checklist (WAJIB sebelum mengaktifkan enforcement):**
+
+Sebelum mengaktifkan enforcement, pastikan **semua** koneksi yang sudah ada memiliki token. Jalankan coverage check:
+
+```bash
+# Cek coverage token di database web
+pnpm --filter 247-web db:check-token-coverage
+```
+
+Jika ada koneksi tanpa token (token = NULL):
+1. Re-pair koneksi tersebut dari dashboard
+2. Proses re-pair akan otomatis menyimpan token ke database
+3. Jalankan ulang coverage check untuk memastikan semua koneksi sudah memiliki token
+
+**Trust posture:**
+- **Single-principal bearer secret**: `agentAuthToken` adalah rahasia tunggal untuk host-shell access
+- **Trusted-LAN/https-tunnel**: Token dikirim plaintext di jaringan (tidak dienkripsi layer tambahan)
+- **Posture konsisten dengan NFR5**: Aman untuk deployment LAN terisolasi atau via Tailscale/Cloudflare Tunnel
+- **Plaintext-at-rest diterima**: Token disimpan plaintext di `~/.247/config.json` (host-local trust boundary)
+
+**Catatan implementasi:**
+- Enforcement logic sudah ada di Story 3.3 (dormant), Story 3.4 mengaktifkannya
+- Coverage check bersifat advisory (tidak memblokir agent boot)
+- Runtime fail-safe tetap aktif per-koneksi (jika token mismatch → reject)
+
 ### Firewall Configuration
 
 **Rekomendasi:** Batasi akses ke trusted IP/subnet saja.

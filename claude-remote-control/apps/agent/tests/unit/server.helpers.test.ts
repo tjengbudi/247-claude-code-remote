@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // URL-safe base64 token, representative of what Story 3.1 produces.
 const API_KEY = 'aGVsbG93b3JsZHRoaXNpc3Rlc3R0b2tlbjEyMzQ1Njc4OTAxMg';
 
-async function loadServerHelpers(apiKey: string | undefined, enforce: boolean) {
+async function loadServerHelpers(apiKey: string | undefined, enforce: boolean | 'default') {
   vi.resetModules();
   vi.doMock('../../src/config.js', () => ({
     config: {
@@ -13,8 +13,10 @@ async function loadServerHelpers(apiKey: string | undefined, enforce: boolean) {
       projects: { basePath: '~/Dev', whitelist: [] },
     },
   }));
-  if (enforce) {
+  if (enforce === true) {
     process.env.AGENT_TOKEN_ENFORCE = 'true';
+  } else if (enforce === false) {
+    process.env.AGENT_TOKEN_ENFORCE = 'false';
   } else {
     delete process.env.AGENT_TOKEN_ENFORCE;
   }
@@ -105,7 +107,29 @@ describe('selectSubprotocol', () => {
 });
 
 describe('shouldAcceptUpgrade', () => {
-  describe('enforcement OFF (default)', () => {
+  describe('enforcement ON (default after Story 3.4)', () => {
+    it('accepts when token matches', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, 'default');
+      expect(shouldAcceptUpgrade(API_KEY)).toBe(true);
+    });
+
+    it('rejects when token is missing', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, 'default');
+      expect(shouldAcceptUpgrade(undefined)).toBe(false);
+    });
+
+    it('rejects when token is wrong', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, 'default');
+      expect(shouldAcceptUpgrade('wrong-token')).toBe(false);
+    });
+
+    it('accepts when no apiKey provisioned (nothing to enforce)', async () => {
+      const { shouldAcceptUpgrade } = await loadServerHelpers(undefined, 'default');
+      expect(shouldAcceptUpgrade('any-token')).toBe(true);
+    });
+  });
+
+  describe('enforcement OFF (explicit opt-out)', () => {
     it('accepts when token matches', async () => {
       const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, false);
       expect(shouldAcceptUpgrade(API_KEY)).toBe(true);
@@ -127,7 +151,7 @@ describe('shouldAcceptUpgrade', () => {
     });
   });
 
-  describe('enforcement ON', () => {
+  describe('enforcement ON (explicit)', () => {
     it('accepts when token matches', async () => {
       const { shouldAcceptUpgrade } = await loadServerHelpers(API_KEY, true);
       expect(shouldAcceptUpgrade(API_KEY)).toBe(true);

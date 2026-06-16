@@ -3,6 +3,21 @@ import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import type { AddressInfo } from 'net';
 
+// Disable token enforcement for WebSocket protocol tests (these test connection
+// mechanics, not auth enforcement which is covered in server.helpers.test.ts).
+// Capture the prior value and restore it after this suite so the process-global
+// env does not bleed into other suites in the same worker.
+const PRIOR_TOKEN_ENFORCE = process.env.AGENT_TOKEN_ENFORCE;
+process.env.AGENT_TOKEN_ENFORCE = 'false';
+
+afterAll(() => {
+  if (PRIOR_TOKEN_ENFORCE === undefined) {
+    delete process.env.AGENT_TOKEN_ENFORCE;
+  } else {
+    process.env.AGENT_TOKEN_ENFORCE = PRIOR_TOKEN_ENFORCE;
+  }
+});
+
 // Mock config
 const mockConfig = {
   machine: { id: 'test-machine', name: 'Test Machine' },

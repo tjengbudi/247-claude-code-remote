@@ -5,6 +5,7 @@
   "scripts": {
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:check-token-coverage": "tsx scripts/check-token-coverage.ts",
     "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start",

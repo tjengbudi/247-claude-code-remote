@@ -70,12 +70,12 @@ export function extractTokenFromProtocol(req: { headers: { [key: string]: string
 /**
  * Decide whether to accept a WS upgrade based on the agent-auth token.
  *
- * - Enforcement OFF (default): always accept, optionally log a warn on mismatch.
- * - Enforcement ON: accept if (a) no token provisioned (nothing to enforce),
+ * - Enforcement ON (default): accept if (a) no token provisioned (nothing to enforce),
  *   or (b) presented token matches expected. Reject otherwise.
+ * - Enforcement OFF (opt-out via `AGENT_TOKEN_ENFORCE=false`): always accept, optionally log a warn on mismatch.
  *
- * Story 3.4 flips AGENT_TOKEN_ENFORCE from "false" to "true" (its own commit,
- * gated on every agent_connection row holding a token). Do NOT flip it here.
+ * Story 3.4 flipped AGENT_TOKEN_ENFORCE to secure-by-default (ON unless explicitly set to "false").
+ * Escape hatch: set `AGENT_TOKEN_ENFORCE=false` to revert to OFF (for testing or legacy deployments).
  *
  * Exported for unit testing (server.helpers.test.ts).
  *
@@ -84,7 +84,7 @@ export function extractTokenFromProtocol(req: { headers: { [key: string]: string
  */
 export function shouldAcceptUpgrade(presentedToken: string | undefined): boolean {
   const expectedToken = config.dashboard?.apiKey;
-  const enforce = process.env.AGENT_TOKEN_ENFORCE === 'true';
+  const enforce = process.env.AGENT_TOKEN_ENFORCE !== 'false';
 
   // No token provisioned → nothing to enforce, always accept
   if (!expectedToken) {
