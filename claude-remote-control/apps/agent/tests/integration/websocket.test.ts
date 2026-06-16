@@ -134,7 +134,7 @@ vi.mock('../../src/terminal.js', () => ({
 
 // Mock child_process
 vi.mock('child_process', () => ({
-  exec: vi.fn((cmd, opts, cb) => {
+  exec: vi.fn((_cmd, opts, cb) => {
     const callback = typeof opts === 'function' ? opts : cb;
     if (callback) callback(null, { stdout: '', stderr: '' });
   }),
