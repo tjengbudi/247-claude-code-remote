@@ -295,7 +295,7 @@ describe('CLI Config', () => {
 
       // Queue ONE distinct non-zero value for the mint (fill 7 ≠ 0)
       // This makes the minted token different from the all-A baseline
-      vi.mocked(randomBytes).mockReturnValueOnce(Buffer.alloc(32, 7));
+      (vi.mocked(randomBytes) as any).mockReturnValueOnce(Buffer.alloc(32, 7));
 
       const existing = {
         machine: { id: 'seeded-real-uuid', name: 'Old Name' },
@@ -341,6 +341,43 @@ describe('CLI Config', () => {
 
       expect(config.machine.id).toBe('test-uuid-1234');
       expect(config.dashboard?.apiKey).toBeDefined();
+    });
+
+    it('preserves existing agent.port when not explicitly provided (AC6)', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const existing = {
+        machine: { id: 'test-uuid', name: 'Test' },
+        agent: { port: 9999 }, // Custom port
+        projects: { basePath: '~/Dev', whitelist: [] },
+      };
+
+      // Re-init without explicit port (simulates `247 init -f` without -p flag)
+      const config = createConfig({ machineName: 'Test', existing });
+
+      expect(config.agent.port).toBe(9999); // Should preserve custom port
+    });
+
+    it('overrides existing agent.port when explicitly provided (AC6)', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+      const existing = {
+        machine: { id: 'test-uuid', name: 'Test' },
+        agent: { port: 9999 }, // Custom port
+        projects: { basePath: '~/Dev', whitelist: [] },
+      };
+
+      // Re-init with explicit port (simulates `247 init -f -p 8888`)
+      const config = createConfig({ machineName: 'Test', port: 8888, existing });
+
+      expect(config.agent.port).toBe(8888); // Should use explicit port
+    });
+
+    it('uses default port (4678) when no existing config and no explicit port (AC6)', async () => {
+      const { createConfig } = await import('../../src/lib/config.js');
+
+      // Fresh init (no existing config)
+      const config = createConfig({ machineName: 'Test' });
+
+      expect(config.agent.port).toBe(4678); // Should use default
     });
 
     it('handles partial existing config (only machine.id present)', async () => {
@@ -461,6 +498,56 @@ describe('CLI Config', () => {
 
       const { configExists } = await import('../../src/lib/config.js');
       expect(configExists()).toBe(false);
+    });
+  });
+
+  describe('redactConfigForDisplay (AC5)', () => {
+    it('masks dashboard.apiKey with asterisks', async () => {
+      const { redactConfigForDisplay } = await import('../../src/lib/config.js');
+      const config = {
+        machine: { id: 'test-uuid', name: 'Test' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: [] },
+        dashboard: { apiKey: 'secret-token-12345' },
+      };
+
+      const redacted = redactConfigForDisplay(config);
+
+      expect(redacted.dashboard?.apiKey).toBe('<redacted>');
+      // Original config should be unchanged (deep copy)
+      expect(config.dashboard.apiKey).toBe('secret-token-12345');
+    });
+
+    it('handles missing dashboard.apiKey gracefully', async () => {
+      const { redactConfigForDisplay } = await import('../../src/lib/config.js');
+      const config = {
+        machine: { id: 'test-uuid', name: 'Test' },
+        agent: { port: 4678 },
+        projects: { basePath: '~/Dev', whitelist: [] },
+      };
+
+      const redacted = redactConfigForDisplay(config);
+
+      expect(redacted.dashboard).toBeUndefined();
+    });
+
+    it('preserves other config fields unchanged', async () => {
+      const { redactConfigForDisplay } = await import('../../src/lib/config.js');
+      const config = {
+        machine: { id: 'test-uuid', name: 'Test Machine' },
+        agent: { port: 9999 },
+        projects: { basePath: '/custom/path', whitelist: ['proj-a'] },
+        dashboard: { apiKey: 'secret' },
+      };
+
+      const redacted = redactConfigForDisplay(config);
+
+      expect(redacted.machine.id).toBe('test-uuid');
+      expect(redacted.machine.name).toBe('Test Machine');
+      expect(redacted.agent.port).toBe(9999);
+      expect(redacted.projects.basePath).toBe('/custom/path');
+      expect(redacted.projects.whitelist).toEqual(['proj-a']);
+      expect(redacted.dashboard?.apiKey).toBe('<redacted>');
     });
   });
 });

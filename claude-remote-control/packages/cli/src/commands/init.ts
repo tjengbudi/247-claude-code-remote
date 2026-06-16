@@ -10,6 +10,7 @@ import {
   configExists,
   loadConfig,
   getProfilePath,
+  DEFAULT_AGENT_PORT,
 } from '../lib/config.js';
 import { ensureDirectories, getAgentPaths } from '../lib/paths.js';
 import { setupTmuxResume } from '../lib/tmux-resume.js';
@@ -17,7 +18,7 @@ import { setupTmuxResume } from '../lib/tmux-resume.js';
 export const initCommand = new Command('init')
   .description('Initialize 247 agent configuration')
   .option('-n, --name <name>', 'Machine name')
-  .option('-p, --port <port>', 'Agent port', '4678')
+  .option('-p, --port <port>', 'Agent port')
   .option('--projects <path>', 'Projects base path', '~/Dev')
   .option('-f, --force', 'Overwrite existing configuration')
   .option('-P, --profile <name>', 'Create or update a named profile')
@@ -44,10 +45,28 @@ export const initCommand = new Command('init')
       return;
     }
 
+    // Load existing config early so we can resolve effective port for prereq check
+    // and preserve custom port on re-init (Story 3.4, AC6).
+    const existing = configExists(profileName) ? loadConfig(profileName) : null;
+
+    // Parse explicit -p once, validating it is a usable port number.
+    let explicitPort: number | undefined;
+    if (options.port !== undefined) {
+      explicitPort = parseInt(options.port, 10);
+      if (Number.isNaN(explicitPort) || explicitPort <= 0 || explicitPort > 65535) {
+        console.log(chalk.red(`\nInvalid --port value: ${options.port}. Must be an integer between 1 and 65535.\n`));
+        process.exit(1);
+      }
+    }
+
+    // Resolve effective port: explicit -p → existing → default.
+    // Pass this to prereq check; pass `undefined` to createConfig if no -p
+    // so its existing?.agent?.port fallback engages.
+    const effectivePort = explicitPort ?? existing?.agent?.port ?? DEFAULT_AGENT_PORT;
+
     // Check prerequisites
     const spinner = ora('Checking prerequisites...').start();
-    const port = parseInt(options.port, 10);
-    const checks = await checkAllPrerequisites(port);
+    const checks = await checkAllPrerequisites(effectivePort);
     spinner.stop();
 
     console.log(chalk.dim('Prerequisites:'));
@@ -95,12 +114,11 @@ export const initCommand = new Command('init')
     const configSpinner = ora(`Creating configuration${profileLabel}...`).start();
     try {
       ensureDirectories();
-      // Load existing config so generate-once secrets (machine.id,
-      // agentAuthToken) survive re-init and --force runs (AC1, AC4).
-      const existing = loadConfig(profileName);
       const config = createConfig({
         machineName,
-        port,
+        // Pass the validated explicit port, or undefined so createConfig's
+        // existing?.agent?.port fallback engages.
+        port: explicitPort,
         projectsPath,
         existing,
       });

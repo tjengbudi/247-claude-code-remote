@@ -35,13 +35,16 @@ export function generateAgentAuthToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
+/** Default agent port. Single source of truth — referenced by init.ts too. */
+export const DEFAULT_AGENT_PORT = 4678;
+
 const DEFAULT_CONFIG: AgentConfig = {
   machine: {
     id: '',
     name: '',
   },
   agent: {
-    port: 4678,
+    port: DEFAULT_AGENT_PORT,
   },
   projects: {
     basePath: '~/Dev',
@@ -204,6 +207,9 @@ export function createConfig(options: {
   const preservedApiUrl = options.existing?.dashboard?.apiUrl;
   const preservedWhitelist = options.existing?.projects?.whitelist ?? [];
   const preservedEditor = options.existing?.editor ?? DEFAULT_CONFIG.editor;
+  // Preserve custom port on re-init (`247 init -f`) unless user explicitly
+  // passes `-p`. Mirrors the preservedMachineId/preservedApiKey pattern.
+  const preservedPort = options.existing?.agent?.port ?? DEFAULT_CONFIG.agent.port;
 
   return {
     ...DEFAULT_CONFIG,
@@ -212,7 +218,7 @@ export function createConfig(options: {
       name: options.machineName,
     },
     agent: {
-      port: options.port ?? DEFAULT_CONFIG.agent.port,
+      port: options.port ?? preservedPort,
     },
     projects: {
       basePath: options.projectsPath ?? DEFAULT_CONFIG.projects.basePath,
@@ -232,4 +238,22 @@ export function createConfig(options: {
 export function configExists(profileName?: string | null): boolean {
   const configPath = getProfilePath(profileName);
   return existsSync(configPath);
+}
+
+/**
+ * Deep-clone a config for display, masking the agent-auth token.
+ *
+ * `dashboard.apiKey` is the host-shell bearer secret (Epic 3). Printing it
+ * raw via `profile show` leaks the token to anyone who can read the
+ * terminal/scrollback. This helper returns a safe-to-print copy.
+ *
+ * **Display-only** — never pass the result to `saveConfig`. The on-disk
+ * config is unchanged; `loadConfig`/`saveConfig` are untouched.
+ */
+export function redactConfigForDisplay(config: AgentConfig): AgentConfig {
+  const redacted: AgentConfig = JSON.parse(JSON.stringify(config));
+  if (redacted.dashboard?.apiKey) {
+    redacted.dashboard.apiKey = '<redacted>';
+  }
+  return redacted;
 }

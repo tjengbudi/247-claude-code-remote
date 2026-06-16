@@ -10,6 +10,7 @@ import {
   createConfig,
   getProfilePath,
   generateAgentAuthToken,
+  redactConfigForDisplay,
 } from '../lib/config.js';
 
 export const profileCommand = new Command('profile')
@@ -59,7 +60,9 @@ export const profileCommand = new Command('profile')
 
         console.log(chalk.bold(`\nProfile: ${chalk.cyan(name)}`));
         console.log(chalk.dim(`Path: ${getProfilePath(profileName)}\n`));
-        console.log(JSON.stringify(config, null, 2));
+        // Redact the agent-auth token for display — dashboard.apiKey is a host-shell
+        // bearer secret (Epic 3). On-disk config is unchanged; this is display-only.
+        console.log(JSON.stringify(redactConfigForDisplay(config), null, 2));
         console.log();
       })
   )
