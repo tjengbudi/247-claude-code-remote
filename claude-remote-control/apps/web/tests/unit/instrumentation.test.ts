@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync } from 'fs';
 
 describe('instrumentation.register()', () => {
   let tempDir: string;
@@ -236,5 +236,38 @@ describe('instrumentation.register()', () => {
 
     const { register } = await import('@/instrumentation');
     await expect(register()).resolves.toBeUndefined();
+  });
+});
+
+describe('instrumentation.ts edge-bundle safety (regression)', () => {
+  // Next bundles instrumentation.ts for BOTH the Node and the Edge Instrumentation
+  // runtimes. A top-level static import of a Node-only dep (argon2 native via
+  // @/lib/auth, fs/path/better-sqlite3 via @/lib/db, or node:crypto) gets pulled
+  // into the edge bundle, where @node-rs/argon2 resolves to its export-less
+  // browser.js — breaking `next dev` (500 on every auth route) AND `next build`
+  // (compile failure). The NEXT_RUNTIME guard blocks EXECUTION but not BUNDLING,
+  // so those deps MUST be loaded via dynamic import() inside register(), after
+  // the guard. Vitest imports in Node and never crosses the edge bundler, so the
+  // other tests above cannot catch a regression here — this static-source check
+  // is the guard. See Epic 4 retro (2026-06-17) for the original incident.
+  it('has no top-level static imports (Node-only deps must be dynamic)', () => {
+    const src = readFileSync(
+      join(__dirname, '../../src/instrumentation.ts'),
+      'utf8',
+    );
+
+    // Strip block + line comments so prose mentioning "import" doesn't false-match.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    // Any value (non-type) top-level static import is forbidden — the file must
+    // reach its Node-only deps through `await import()` inside register().
+    const staticImports = code
+      .split('\n')
+      .map((l: string) => l.trim())
+      .filter((l: string) => /^import\b/.test(l) && !/^import\s+type\b/.test(l));
+
+    expect(staticImports).toEqual([]);
   });
 });
