@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, pushSubscription } from '@/lib/db';
 import { and, eq } from 'drizzle-orm';
+import { requireUser, AuthError } from '@/lib/auth';
 
 /**
  * POST /api/push/subscribe
@@ -8,11 +9,7 @@ import { and, eq } from 'drizzle-orm';
  */
 export async function POST(req: Request) {
   try {
-    const { neonAuth } = await import('@neondatabase/auth/next/server');
-    const { user } = await neonAuth();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { user } = await requireUser();
 
     const body = await req.json();
     const { subscription, userAgent } = body;
@@ -47,7 +44,10 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, id: result.id });
   } catch (error) {
-    console.error('[Push] Error subscribing:', error);
+    // Option A: discriminable 401 before generic 500
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: error.status });
+    }
     return NextResponse.json({ error: 'Failed to subscribe' }, { status: 500 });
   }
 }
@@ -58,11 +58,7 @@ export async function POST(req: Request) {
  */
 export async function DELETE(req: Request) {
   try {
-    const { neonAuth } = await import('@neondatabase/auth/next/server');
-    const { user } = await neonAuth();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { user } = await requireUser();
 
     const body = await req.json();
     const { endpoint } = body;
@@ -80,7 +76,9 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('[Push] Error unsubscribing:', error);
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: error.status });
+    }
     return NextResponse.json({ error: 'Failed to unsubscribe' }, { status: 500 });
   }
 }

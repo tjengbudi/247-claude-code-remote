@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Loader2, AlertTriangle, Server, Sparkles, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { authClient } from '@/lib/auth-client';
+import { useAuth } from '@/lib/auth/client';
 
 interface AgentInfo {
   machineId: string;
@@ -60,6 +60,7 @@ function Confetti() {
 function ConnectContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { getSession } = useAuth();
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'connecting' | 'success' | 'error'>(
     'loading'
@@ -74,15 +75,11 @@ function ConnectContent() {
   // Check authentication status on mount
   useEffect(() => {
     async function checkAuth() {
-      try {
-        const session = await authClient.getSession();
-        setIsAuthenticated(!!session?.data?.user);
-      } catch {
-        setIsAuthenticated(false);
-      }
+      const session = await getSession();
+      setIsAuthenticated(!!session?.data?.user);
     }
     checkAuth();
-  }, []);
+  }, [getSession]);
 
   // Validate token or code on mount
   useEffect(() => {

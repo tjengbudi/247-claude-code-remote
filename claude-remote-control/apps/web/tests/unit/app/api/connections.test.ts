@@ -3,10 +3,10 @@
  * Route-level E2E tests for agent_connection API routes.
  *
  * Exercises the actual exported route handlers (GET/POST/PUT/DELETE) against a
- * real temp web.db via WEB_DB_PATH. neonAuth() is mocked at the module level
+ * real temp web.db via WEB_DB_PATH. requireUser() is mocked at the module level
  * so the identity layer is stubbed but the DB path is fully real.
  *
- * Proves AC2 (connection CRUD through routes) and AC4 (neonAuth boot-safety
+ * Proves AC2 (connection CRUD through routes) and AC4 (requireUser boot-safety
  * still returns 401 when unauthenticated).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -14,12 +14,27 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { mkdtempSync, rmSync } from 'fs';
 
-// Mutable auth mock — tests flip the returned user between authed/unauthed
-const mockUser: { id: string | null } = { id: 'test-user-1' };
-vi.mock('@neondatabase/auth/next/server', () => ({
-  neonAuth: vi.fn(async () => ({
-    user: mockUser.id ? { id: mockUser.id } : null,
-  })),
+// Mutable auth mock — tests flip the returned user between authed/unauthed.
+// vi.hoisted() ensures the AuthError class is defined before vi.mock() hoists,
+// so the route's `instanceof AuthError` check matches the same class reference.
+const { mockUser, MockAuthError } = vi.hoisted(() => {
+  const mockUser: { id: string | null } = { id: 'test-user-1' };
+  class MockAuthError extends Error {
+    readonly status = 401;
+    constructor(message = 'Unauthorized') {
+      super(message);
+      this.name = 'AuthError';
+    }
+  }
+  return { mockUser, MockAuthError };
+});
+
+vi.mock('@/lib/auth', () => ({
+  AuthError: MockAuthError,
+  requireUser: vi.fn(async () => {
+    if (!mockUser.id) throw new MockAuthError();
+    return { user: { id: mockUser.id } };
+  }),
 }));
 
 describe('api/connections route handlers', () => {
@@ -94,7 +109,7 @@ describe('api/connections route handlers', () => {
       expect(body.every((r: { userId: string }) => r.userId === 'test-user-1')).toBe(true);
     });
 
-    it('returns 401 when neonAuth() returns no user (AC4)', async () => {
+    it('returns 401 when requireUser() throws (AC4)', async () => {
       mockUser.id = null;
       const { GET } = await import('@/app/api/connections/route');
       const res = await GET();

@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "247-shared": "workspace:*",
-    "@neondatabase/auth": "0.1.0-beta.21",
     "@node-rs/argon2": "2.0.2",
     "better-sqlite3": "^12.5.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",

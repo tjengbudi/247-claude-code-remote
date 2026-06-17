@@ -64,7 +64,14 @@ export function useAuth() {
   }, []);
 
   const signOut = useCallback(async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    // Swallow network/HTTP failures so consumers can rely on signOut() never
+    // throwing — the post-logout window.location.reload() must always run, and
+    // a failed logout is recovered by the next session check. [Source: 4.4 review #2]
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // ignore — reload + session re-check is the recovery path
+    }
   }, []);
 
   return { getSession, signOut };

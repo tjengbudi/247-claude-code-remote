@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { spring } from '@/lib/animations';
-import { authClient } from '@/lib/auth-client';
+import { useAuth } from '@/lib/auth/client';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -47,13 +47,13 @@ function UserMenu({ onOpenNotificationSettings }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const [user, setUser] = useState<{ name: string; email: string; initials: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { getSession, signOut } = useAuth();
 
   // Fetch real user data from session
   useEffect(() => {
     const fetchUser = async () => {
-      try {
-        const session = await authClient.getSession();
-        if (session?.data?.user) {
+      const session = await getSession();
+      if (session?.data?.user) {
           const name = session.data.user.name || '';
           const email = session.data.user.email || '';
           const initials = name
@@ -66,22 +66,14 @@ function UserMenu({ onOpenNotificationSettings }: UserMenuProps) {
             : email?.[0]?.toUpperCase() || 'U';
           setUser({ name, email, initials });
         }
-      } catch {
-        // Not logged in
-      } finally {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     };
     fetchUser();
-  }, []);
+  }, [getSession]);
 
   const handleLogout = async () => {
-    try {
-      await authClient.signOut();
-      window.location.reload();
-    } catch (error) {
-      console.error('Logout failed:', error);
-    }
+    await signOut();
+    window.location.reload();
   };
 
   if (isLoading) {

@@ -24,7 +24,7 @@ import {
   type saveAgentConnection,
 } from '@/components/AgentConnectionSettings';
 import { InstallationGuide } from '@/components/InstallationGuide';
-import { authClient } from '@/lib/auth-client';
+import { useAuth } from '@/lib/auth/client';
 import { AnimatePresence } from 'framer-motion';
 
 const LOCAL_MODE = process.env.NEXT_PUBLIC_LOCAL_MODE === 'true';
@@ -151,6 +151,7 @@ function AuthButton() {
   const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
+  const { getSession, signOut } = useAuth();
 
   // Fetch user info on mount
   useEffect(() => {
@@ -159,22 +160,17 @@ function AuthButton() {
       return;
     }
     const fetchUser = async () => {
-      try {
-        const session = await authClient.getSession();
-        if (session?.data?.user) {
-          setUser({
-            name: session.data.user.name,
-            email: session.data.user.email,
-          });
-        }
-      } catch {
-        // Not logged in
-      } finally {
-        setIsLoading(false);
+      const session = await getSession();
+      if (session?.data?.user) {
+        setUser({
+          name: session.data.user.name,
+          email: session.data.user.email ?? undefined,
+        });
       }
+      setIsLoading(false);
     };
     fetchUser();
-  }, []);
+  }, [getSession]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -188,12 +184,8 @@ function AuthButton() {
   }, []);
 
   const handleLogout = async () => {
-    try {
-      await authClient.signOut();
-      window.location.reload();
-    } catch (error) {
-      console.error('Logout failed:', error);
-    }
+    await signOut();
+    window.location.reload();
   };
 
   if (isLoading) {
@@ -531,22 +523,18 @@ export function NoConnectionView({
 }: NoConnectionViewProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(LOCAL_MODE);
   const [isCheckingAuth, setIsCheckingAuth] = useState(!LOCAL_MODE);
+  const { getSession } = useAuth();
 
   // Check auth status on mount
   useEffect(() => {
     if (LOCAL_MODE) return;
     const checkAuth = async () => {
-      try {
-        const session = await authClient.getSession();
-        setIsAuthenticated(!!session?.data?.user);
-      } catch {
-        setIsAuthenticated(false);
-      } finally {
-        setIsCheckingAuth(false);
-      }
+      const session = await getSession();
+      setIsAuthenticated(!!session?.data?.user);
+      setIsCheckingAuth(false);
     };
     checkAuth();
-  }, []);
+  }, [getSession]);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#0a0a10] selection:bg-orange-500/20">

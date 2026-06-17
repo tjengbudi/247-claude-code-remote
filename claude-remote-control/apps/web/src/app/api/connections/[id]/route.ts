@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
 import { db, agentConnection } from '@/lib/db';
 import { eq, and } from 'drizzle-orm';
+import { requireUser, AuthError } from '@/lib/auth';
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { neonAuth } = await import('@neondatabase/auth/next/server');
-    const { user } = await neonAuth();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { user } = await requireUser();
 
     const { id } = await params;
 
@@ -18,18 +15,17 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error deleting connection:', error);
+    // Option A: discriminable 401 before generic 500
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: error.status });
+    }
     return NextResponse.json({ error: 'Failed to delete connection' }, { status: 500 });
   }
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { neonAuth } = await import('@neondatabase/auth/next/server');
-    const { user } = await neonAuth();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const { user } = await requireUser();
 
     const { id } = await params;
     const body = await req.json();
@@ -52,7 +48,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
     return NextResponse.json(connection);
   } catch (error) {
-    console.error('Error updating connection:', error);
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: error.status });
+    }
     return NextResponse.json({ error: 'Failed to update connection' }, { status: 500 });
   }
 }

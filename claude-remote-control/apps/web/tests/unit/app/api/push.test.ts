@@ -3,23 +3,38 @@
  * Route-level E2E tests for push_subscription API routes.
  *
  * Exercises POST/DELETE /api/push/subscribe and POST /api/push/notify against
- * a real temp web.db. neonAuth() is mocked for subscribe routes (auth-gated);
+ * a real temp web.db. requireUser() is mocked for subscribe routes (auth-gated);
  * notify is unauthenticated by design.
  *
  * Proves AC2 (push_subscription CRUD including onConflictDoUpdate upsert)
- * and AC4 (neonAuth boot-safety returns 401 when unauthenticated).
+ * and AC4 (requireUser boot-safety returns 401 when unauthenticated).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { mkdtempSync, rmSync } from 'fs';
 
-// Mutable auth mock
-const mockUser: { id: string | null } = { id: 'test-user-1' };
-vi.mock('@neondatabase/auth/next/server', () => ({
-  neonAuth: vi.fn(async () => ({
-    user: mockUser.id ? { id: mockUser.id } : null,
-  })),
+// Mutable auth mock.
+// vi.hoisted() ensures the AuthError class is defined before vi.mock() hoists,
+// so the route's `instanceof AuthError` check matches the same class reference.
+const { mockUser, MockAuthError } = vi.hoisted(() => {
+  const mockUser: { id: string | null } = { id: 'test-user-1' };
+  class MockAuthError extends Error {
+    readonly status = 401;
+    constructor(message = 'Unauthorized') {
+      super(message);
+      this.name = 'AuthError';
+    }
+  }
+  return { mockUser, MockAuthError };
+});
+
+vi.mock('@/lib/auth', () => ({
+  AuthError: MockAuthError,
+  requireUser: vi.fn(async () => {
+    if (!mockUser.id) throw new MockAuthError();
+    return { user: { id: mockUser.id } };
+  }),
 }));
 
 // Mock the push delivery layer (wraps web-push + VAPID env)

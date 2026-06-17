@@ -3,7 +3,6 @@ import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
 import { Toaster } from '@/components/ui/sonner';
 import { Providers } from '@/components/Providers';
-import { AuthProvider } from '@/components/AuthProvider';
 import './globals.css';
 import '@/styles/design-system.css';
 
@@ -76,9 +75,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <body className="bg-background text-foreground min-h-screen font-sans antialiased">
-        <AuthProvider>
-          <Providers>{children}</Providers>
-        </AuthProvider>
+        <Providers>{children}</Providers>
         <Toaster />
       </body>
     </html>
