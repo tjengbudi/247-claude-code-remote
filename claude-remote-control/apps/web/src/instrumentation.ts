@@ -1,12 +1,16 @@
-import { randomUUID } from 'crypto'
-import { ownerExists, hashPassword, getWebAuthSecret } from '@/lib/auth'
-import { db, user } from '@/lib/db'
-import { createLogger } from '@/lib/logger'
-
-const logger = createLogger('Seed')
-
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+
+  // Node-only deps (argon2 native binary, better-sqlite3, fs/path) are imported
+  // dynamically AFTER the runtime guard. A top-level static import pulls them into
+  // the Edge Instrumentation bundle too, where `@node-rs/argon2` resolves to its
+  // export-less `browser.js` and `fs`/`process.cwd` are unsupported — that breaks
+  // both `next dev` (500 on every auth route) and `next build` (compile failure).
+  const { randomUUID } = await import('crypto')
+  const { ownerExists, hashPassword, getWebAuthSecret } = await import('@/lib/auth')
+  const { db, user } = await import('@/lib/db')
+  const { createLogger } = await import('@/lib/logger')
+  const logger = createLogger('Seed')
 
   // Fail fast at boot if the signing secret is missing/weak. Without this the
   // container comes up green and only 500s on the first auth request, so an
