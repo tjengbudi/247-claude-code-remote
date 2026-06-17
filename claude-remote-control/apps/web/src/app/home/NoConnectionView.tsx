@@ -27,8 +27,6 @@ import { InstallationGuide } from '@/components/InstallationGuide';
 import { useAuth } from '@/lib/auth/client';
 import { AnimatePresence } from 'framer-motion';
 
-const LOCAL_MODE = process.env.NEXT_PUBLIC_LOCAL_MODE === 'true';
-
 interface NoConnectionViewProps {
   modalOpen: boolean;
   onModalOpenChange: (open: boolean) => void;
@@ -155,10 +153,6 @@ function AuthButton() {
 
   // Fetch user info on mount
   useEffect(() => {
-    if (LOCAL_MODE) {
-      setIsLoading(false);
-      return;
-    }
     const fetchUser = async () => {
       const session = await getSession();
       if (session?.data?.user) {
@@ -521,13 +515,12 @@ export function NoConnectionView({
   onModalOpenChange,
   onConnectionSaved,
 }: NoConnectionViewProps) {
-  const [isAuthenticated, setIsAuthenticated] = useState(LOCAL_MODE);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(!LOCAL_MODE);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const { getSession } = useAuth();
 
   // Check auth status on mount
   useEffect(() => {
-    if (LOCAL_MODE) return;
     const checkAuth = async () => {
       const session = await getSession();
       setIsAuthenticated(!!session?.data?.user);

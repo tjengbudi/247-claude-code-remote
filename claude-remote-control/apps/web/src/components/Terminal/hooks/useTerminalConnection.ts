@@ -30,7 +30,7 @@ interface UseTerminalConnectionProps {
   onCopySuccess: () => void;
   /** Mobile mode - use smaller font and handle orientation changes */
   isMobile?: boolean;
-  /** Agent-auth token (URL-safe base64) — forwarded via Sec-WebSocket-Protocol. May be undefined for pre-3.2 rows or LOCAL_MODE. */
+  /** Agent-auth token (URL-safe base64) — forwarded via Sec-WebSocket-Protocol. May be undefined for pre-3.2 rows. */
   token?: string;
 }
 
