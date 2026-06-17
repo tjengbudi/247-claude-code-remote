@@ -409,9 +409,17 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
+
+> **⚠️ WAJIB untuk dashboard web (port 3000) di belakang nginx:** sertakan
+> `proxy_set_header X-Forwarded-Proto $scheme;`. Dashboard menentukan flag
+> `Secure` + prefix `__Host-` pada cookie sesi **hanya** dari header ini (request
+> yang sampai ke Next selalu plain http di belakang proxy, jadi protokol URL tak
+> bermakna). Tanpa header ini, cookie sesi di-set tanpa `Secure` walau diakses
+> via https. Caddy dan Tailscale serve menyetel header ini otomatis.
 
 **Caddy example:**
 

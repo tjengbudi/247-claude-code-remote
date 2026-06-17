@@ -33,6 +33,29 @@ const SECRET_KEY = 'web_auth_secret';
 // Min entropy: 32 bytes = 256 bits (reject env values shorter than this)
 const MIN_SECRET_BYTES = 32;
 
+// Min distinct bytes: a length-only gate accepts `'a'.repeat(32)` (32 bytes,
+// near-zero entropy). Requiring a floor of distinct byte values rejects the
+// obvious low-entropy cases (repeated char, short alphabet) without pretending
+// to be a real entropy estimator. A random 32-byte secret has ~28 distinct
+// bytes on average, so 16 is a comfortable floor that trivial values fail.
+const MIN_DISTINCT_BYTES = 16;
+
+/**
+ * Reject a secret that clears the length bar but is obviously low-entropy.
+ * Returns a reason string if weak, or null if acceptable.
+ */
+function weakSecretReason(secret: string): string | null {
+  const bytes = Buffer.byteLength(secret, 'utf8');
+  if (bytes < MIN_SECRET_BYTES) {
+    return `too short (min ${MIN_SECRET_BYTES} bytes, got ${bytes})`;
+  }
+  const distinct = new Set(Buffer.from(secret, 'utf8')).size;
+  if (distinct < MIN_DISTINCT_BYTES) {
+    return `too few distinct bytes (min ${MIN_DISTINCT_BYTES}, got ${distinct})`;
+  }
+  return null;
+}
+
 // Memoize so the secret is stable per process
 let _cachedSecret: string | null = null;
 
@@ -53,12 +76,10 @@ export async function getWebAuthSecret(): Promise<string> {
   // Env-first
   const envSecret = process.env.WEB_AUTH_SECRET;
   if (envSecret) {
-    // Min-entropy enforcement: reject too-short values
-    if (Buffer.byteLength(envSecret, 'utf8') < MIN_SECRET_BYTES) {
-      throw new Error(
-        `[bootstrap] WEB_AUTH_SECRET env value is too short ` +
-          `(min ${MIN_SECRET_BYTES} bytes, got ${Buffer.byteLength(envSecret, 'utf8')})`
-      );
+    // Min-entropy enforcement: reject too-short / low-entropy values
+    const weak = weakSecretReason(envSecret);
+    if (weak) {
+      throw new Error(`[bootstrap] WEB_AUTH_SECRET env value is ${weak}`);
     }
     _cachedSecret = envSecret;
     return envSecret;
@@ -68,12 +89,10 @@ export async function getWebAuthSecret(): Promise<string> {
   const persisted = await readPersistedSecret();
   if (persisted) {
     // A persisted value must clear the same entropy bar as an env value —
-    // a short/empty/corrupted row must not silently become the signing secret.
-    if (Buffer.byteLength(persisted, 'utf8') < MIN_SECRET_BYTES) {
-      throw new Error(
-        `[bootstrap] persisted WEB_AUTH_SECRET is too short ` +
-          `(min ${MIN_SECRET_BYTES} bytes, got ${Buffer.byteLength(persisted, 'utf8')})`
-      );
+    // a short/weak/corrupted row must not silently become the signing secret.
+    const weak = weakSecretReason(persisted);
+    if (weak) {
+      throw new Error(`[bootstrap] persisted WEB_AUTH_SECRET is ${weak}`);
     }
     _cachedSecret = persisted;
     return persisted;
@@ -105,7 +124,7 @@ export async function getWebAuthSecret(): Promise<string> {
       target: [userSettings.userId, userSettings.key],
     });
 
-  const winner = (await readPersistedSecret()) ?? generated;
+  const winner = (await readPersistedSecret()) || generated;
   _cachedSecret = winner;
   return winner;
 }
@@ -120,7 +139,9 @@ async function readPersistedSecret(): Promise<string | null> {
     .where(and(eq(userSettings.userId, SYSTEM_OWNER), eq(userSettings.key, SECRET_KEY)))
     .limit(1);
 
-  if (rows.length > 0 && rows[0]) {
+  if (rows.length > 0 && rows[0] && rows[0].value) {
+    // Treat an empty stored value as absent — an empty row must never become
+    // the signing secret (it would also slip past the truthy entropy guard).
     return rows[0].value;
   }
   return null;

@@ -109,7 +109,15 @@ export async function destroySession(): Promise<void> {
     const raw = cookieStore.get(name)?.value;
     if (raw) {
       const tokenHash = createHash('sha256').update(raw).digest('hex');
-      await db.delete(sessionTable).where(eq(sessionTable.tokenHash, tokenHash));
+      // Guarded like validateSession's opportunistic delete: a busy/locked DB
+      // must not turn logout into a 500 and leave the cookie uncleared. Clear
+      // the cookie regardless so the client is logged out client-side even if
+      // the row delete fails (it gets swept later on expiry).
+      try {
+        await db.delete(sessionTable).where(eq(sessionTable.tokenHash, tokenHash));
+      } catch {
+        // best-effort row delete; cookie clear below still runs
+      }
     }
     cookieStore.delete({ name, path: '/' });
   }

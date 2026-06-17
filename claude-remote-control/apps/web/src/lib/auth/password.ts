@@ -45,9 +45,11 @@ export async function verifyPassword(hash: string, plain: string): Promise<boole
  */
 export function needsRehash(hash: string): boolean {
   // PHC format: $argon2id$v=19$m=19456,t=2,p=1$...
-  // Match argon2id ONLY — argon2i/argon2d are weaker variants that must be
-  // rehashed up to argon2id even if their m/t/p meet the floor.
-  const match = hash.match(/^\$argon2id\$v=\d+\$m=(\d+),t=(\d+),p=(\d+)\$/);
+  // The v= segment is OPTIONAL per the PHC spec (a version-less hash is valid),
+  // so match it optionally — a sound argon2id hash without v= must not be
+  // force-rehashed. Match argon2id ONLY: argon2i/argon2d are weaker variants
+  // that must be rehashed up to argon2id even if their m/t/p meet the floor.
+  const match = hash.match(/^\$argon2id\$(?:v=\d+\$)?m=(\d+),t=(\d+),p=(\d+)\$/);
   if (!match) {
     // Unknown format or weaker variant (argon2i/argon2d) — assume needs rehash
     return true;

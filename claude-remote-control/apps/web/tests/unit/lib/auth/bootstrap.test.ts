@@ -33,7 +33,8 @@ describe('bootstrap', () => {
 
   describe('getWebAuthSecret', () => {
     it('returns env value when set and long enough', async () => {
-      const secret = 'a'.repeat(32);
+      // Must clear BOTH the length and the distinct-byte floor.
+      const secret = 'M8q3Vz7Lp1Rw0Yt6Bd4Xn9Hk2Cs5Gj7F';
       process.env.WEB_AUTH_SECRET = secret;
 
       const result = await getWebAuthSecret();
@@ -45,6 +46,46 @@ describe('bootstrap', () => {
       process.env.WEB_AUTH_SECRET = 'short';
 
       await expect(getWebAuthSecret()).rejects.toThrow(/too short/);
+    });
+
+    it('throws if env value clears length but is low-entropy (P3)', async () => {
+      // 32 bytes but a single repeated char — passes a length-only gate,
+      // fails the distinct-byte floor.
+      process.env.WEB_AUTH_SECRET = 'a'.repeat(32);
+
+      await expect(getWebAuthSecret()).rejects.toThrow(/distinct bytes/);
+    });
+
+    it('treats an empty persisted row as absent, not as the secret (P4)', async () => {
+      // A blank/corrupted row must NOT become the signing secret. readPersistedSecret
+      // returns null for an empty value, so we fall through to generate in dev.
+      process.env.WEB_AUTH_SECRET = '';
+      Object.defineProperty(process.env, 'NODE_ENV', {
+        value: 'development',
+        writable: true,
+        configurable: true,
+      });
+
+      const where = vi.fn();
+      const limit = vi.fn();
+      const insertValues = vi.fn();
+
+      mockDb.select.mockReturnValue({
+        from: vi.fn().mockReturnValue({ where }),
+      });
+      where.mockReturnValue({ limit });
+      // Pre-insert read returns an empty-valued row; post-insert re-read also
+      // empty → winner falls back to the freshly generated hex (|| not ??).
+      limit.mockResolvedValueOnce([{ value: '' }]).mockResolvedValueOnce([{ value: '' }]);
+
+      mockDb.insert.mockReturnValue({ values: insertValues });
+      insertValues.mockReturnValue({ onConflictDoNothing: vi.fn().mockResolvedValue(undefined) });
+
+      const result = await getWebAuthSecret();
+
+      // Generated 64-char hex, NOT the empty string.
+      expect(result).toMatch(/^[0-9a-f]{64}$/);
+      expect(insertValues).toHaveBeenCalled();
     });
 
     it('returns persisted value when env not set', async () => {
@@ -168,7 +209,7 @@ describe('bootstrap', () => {
     });
 
     it('memoizes the secret', async () => {
-      const secret = 'a'.repeat(32);
+      const secret = 'M8q3Vz7Lp1Rw0Yt6Bd4Xn9Hk2Cs5Gj7F';
       process.env.WEB_AUTH_SECRET = secret;
 
       await getWebAuthSecret();

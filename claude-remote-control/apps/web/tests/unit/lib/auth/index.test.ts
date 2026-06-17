@@ -77,6 +77,27 @@ describe('auth seam', () => {
       expect(result).toEqual({ id: 'user-flip' });
       expect(validateSession).toHaveBeenCalledWith('plain-token');
     });
+
+    it('skips a stale first-name cookie and returns the valid second one (P1)', async () => {
+      // Both cookies present after an https↔http flip: the secure name holds a
+      // stale token, the plain name a live one. Breaking on presence would mask
+      // the live session; validate-each must skip the stale one and return the
+      // valid one.
+      mockCookieStore.get.mockImplementation((name: string) =>
+        name === '__Host-247_session'
+          ? { value: 'stale-secure-token' }
+          : { value: 'live-plain-token' }
+      );
+      vi.mocked(validateSession).mockImplementation(async (raw: string) =>
+        raw === 'live-plain-token' ? { id: 'user-live' } : null
+      );
+
+      const result = await getCurrentUser();
+
+      expect(result).toEqual({ id: 'user-live' });
+      expect(validateSession).toHaveBeenCalledWith('stale-secure-token');
+      expect(validateSession).toHaveBeenCalledWith('live-plain-token');
+    });
   });
 
   describe('requireUser', () => {

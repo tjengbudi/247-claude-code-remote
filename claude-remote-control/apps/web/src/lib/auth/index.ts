@@ -51,17 +51,17 @@ export async function getCurrentUser(): Promise<{ id: string } | null> {
   const cookieStore = await cookies();
   // Read under both names: the protocol detected when the cookie was set may
   // differ from the current request's, so a single-name lookup could miss it.
-  let raw: string | undefined;
+  // Validate each present token and return the first VALID one — breaking on
+  // mere presence would let a stale cookie under one name mask a live session
+  // under the other (e.g. after an https↔http flip leaves both cookies set).
   for (const name of cookieNames()) {
-    raw = cookieStore.get(name)?.value;
-    if (raw) break;
+    const raw = cookieStore.get(name)?.value;
+    if (!raw) continue;
+    const user = await validateSession(raw);
+    if (user) return user;
   }
 
-  if (!raw) {
-    return null;
-  }
-
-  return validateSession(raw);
+  return null;
 }
 
 /**

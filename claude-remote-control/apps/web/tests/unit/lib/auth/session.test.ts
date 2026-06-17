@@ -33,6 +33,7 @@ vi.mock('@/lib/db', () => ({
   db: mockDb,
 }));
 
+import { cookieIsSecure } from '@/lib/auth/cookie-protocol';
 import { createSession, validateSession, destroySession, SESSION_TTL_MS } from '@/lib/auth/session';
 
 describe('session', () => {
@@ -78,6 +79,28 @@ describe('session', () => {
         sameSite: 'lax',
         path: '/',
         secure: false,
+        maxAge: Math.floor(SESSION_TTL_MS / 1000),
+      });
+    });
+
+    it('sets __Host- name + Secure on https (P5)', async () => {
+      // AC8 requires the session suite to exercise BOTH protocols. The default
+      // mock returns http; drive the secure branch by overriding cookieIsSecure.
+      vi.mocked(cookieIsSecure).mockResolvedValueOnce(true);
+
+      const insertValues = vi.fn();
+      mockDb.insert.mockReturnValue({ values: insertValues });
+      insertValues.mockResolvedValue(undefined);
+
+      await createSession('user-123');
+
+      const setCall = mockCookieStore.set.mock.calls[0]!;
+      expect(setCall[0]).toBe('__Host-247_session'); // https → __Host- prefix
+      expect(setCall[2]).toMatchObject({
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: true,
         maxAge: Math.floor(SESSION_TTL_MS / 1000),
       });
     });
@@ -197,6 +220,27 @@ describe('session', () => {
 
       // Row deleted (found under the secure name) and both names cleared.
       expect(deleteWhere).toHaveBeenCalled();
+      expect(mockCookieStore.delete).toHaveBeenCalledWith({
+        name: '__Host-247_session',
+        path: '/',
+      });
+      expect(mockCookieStore.delete).toHaveBeenCalledWith({
+        name: '247_session',
+        path: '/',
+      });
+    });
+
+    it('clears the cookie even when the row delete fails (P2)', async () => {
+      // A busy/locked DB must not turn logout into a 500 and leave the cookie
+      // uncleared — the client must still be logged out client-side.
+      mockCookieStore.get.mockReturnValue({ value: 'session-busy-db-token' });
+
+      const deleteWhere = vi.fn();
+      mockDb.delete.mockReturnValue({ where: deleteWhere });
+      deleteWhere.mockRejectedValue(new Error('SQLITE_BUSY'));
+
+      await expect(destroySession()).resolves.toBeUndefined();
+
       expect(mockCookieStore.delete).toHaveBeenCalledWith({
         name: '__Host-247_session',
         path: '/',

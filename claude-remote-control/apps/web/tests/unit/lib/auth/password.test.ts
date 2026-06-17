@@ -50,6 +50,14 @@ describe('password', () => {
       expect(needsRehash(unknown)).toBe(true);
     });
 
+    it('returns false for a version-less PHC hash at the floor (P6)', () => {
+      // PHC spec makes the `v=` segment optional. @node-rs/argon2 always emits
+      // v=19, but a hash produced elsewhere may omit it — the regex must still
+      // parse it rather than force a needless rehash of a sound hash.
+      const noVersion = '$argon2id$m=19456,t=2,p=1$somesalt$somehash';
+      expect(needsRehash(noVersion)).toBe(false);
+    });
+
     it('returns true for a weaker argon2 variant even at the param floor', () => {
       // argon2i (not argon2id) at floor params: the variant itself is weaker,
       // so it must be flagged for upgrade rather than accepted.
