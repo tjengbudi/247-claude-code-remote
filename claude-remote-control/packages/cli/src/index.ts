@@ -12,6 +12,7 @@ import { doctorCommand } from './commands/doctor.js';
 import { profileCommand } from './commands/profile.js';
 import { versionCommand } from './commands/version.js';
 import { hooksCommand } from './commands/hooks.js';
+import { tokenCommand } from './commands/token.js';
 
 const program = new Command();
 
@@ -33,6 +34,7 @@ program.addCommand(doctorCommand);
 program.addCommand(profileCommand);
 program.addCommand(versionCommand);
 program.addCommand(hooksCommand);
+program.addCommand(tokenCommand);
 
 // Export program for use in subcommands (to access global options)
 export { program };
