@@ -355,17 +355,29 @@ Pastikan nilai yang Anda set menunjuk ke dashboard lokal/LAN Anda, bukan domain 
 
 **Pre-flip checklist (WAJIB sebelum mengaktifkan enforcement):**
 
-Sebelum mengaktifkan enforcement, pastikan **semua** koneksi yang sudah ada memiliki token. Jalankan coverage check:
+Sebelum mengaktifkan enforcement, ikuti langkah berikut **secara berurutan**:
 
-```bash
-# Cek coverage token di database web
-pnpm --filter 247-web db:check-token-coverage
-```
+1. **Cek token coverage dari dashboard** (atau CLI):
+   - **Docker/operator (dashboard):** Buka **User Menu → Token Coverage** di dashboard. Pastikan semua koneksi menunjukkan status "covered" (bukan "tokenless").
+   - **Developer (CLI):** `pnpm --filter 247-web db:check-token-coverage` (perlu source checkout, bukan CLI npm global)
+
+2. **Verifikasi token benar-benar berfungsi** (presence ≠ correctness):
+   ```bash
+   247 token --test
+   ```
+   Ini melakukan WS-upgrade nyata ke agent — memverifikasi token tidak hanya ada, tapi benar-benar diterima oleh agent.
+
+3. **Aktifkan enforcement** (jika langkah 1 dan 2 sudah bersih):
+   ```bash
+   # Default sudah ON — hanya perlu set jika sebelumnya dimatikan
+   # Hapus AGENT_TOKEN_ENFORCE=false dari environment, atau set:
+   AGENT_TOKEN_ENFORCE=true
+   ```
 
 Jika ada koneksi tanpa token (token = NULL):
 1. Re-pair koneksi tersebut dari dashboard
 2. Proses re-pair akan otomatis menyimpan token ke database
-3. Jalankan ulang coverage check untuk memastikan semua koneksi sudah memiliki token
+3. Jalankan ulang langkah 1 dan 2 untuk memastikan semua koneksi sudah memiliki token
 
 **Trust posture:**
 - **Single-principal bearer secret**: `agentAuthToken` adalah rahasia tunggal untuk host-shell access

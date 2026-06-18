@@ -13,6 +13,7 @@ import {
   Maximize2,
   Minimize2,
   Loader2,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { spring } from '@/lib/animations';
@@ -33,6 +34,7 @@ interface AppHeaderProps {
   onToggleFullscreen?: () => void;
   isFullscreen?: boolean;
   onOpenNotificationSettings?: () => void;
+  onOpenTokenCoverage?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -41,9 +43,10 @@ interface AppHeaderProps {
 
 interface UserMenuProps {
   onOpenNotificationSettings?: () => void;
+  onOpenTokenCoverage?: () => void;
 }
 
-function UserMenu({ onOpenNotificationSettings }: UserMenuProps) {
+function UserMenu({ onOpenNotificationSettings, onOpenTokenCoverage }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const [user, setUser] = useState<{ name: string; email: string; initials: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -166,6 +169,16 @@ function UserMenu({ onOpenNotificationSettings }: UserMenuProps) {
                 <Bell className="h-4 w-4" />
                 Notifications
               </button>
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onOpenTokenCoverage?.();
+                }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/70 hover:bg-white/5 hover:text-white/90"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Token Coverage
+              </button>
 
               <div className="my-1 h-px bg-white/5" />
 
@@ -237,6 +250,7 @@ export function AppHeader({
   onToggleFullscreen,
   isFullscreen,
   onOpenNotificationSettings,
+  onOpenTokenCoverage,
 }: AppHeaderProps) {
   return (
     <header
@@ -329,7 +343,7 @@ export function AppHeader({
         </button>
 
         {/* User Menu */}
-        <UserMenu onOpenNotificationSettings={onOpenNotificationSettings} />
+        <UserMenu onOpenNotificationSettings={onOpenNotificationSettings} onOpenTokenCoverage={onOpenTokenCoverage} />
       </div>
     </header>
   );

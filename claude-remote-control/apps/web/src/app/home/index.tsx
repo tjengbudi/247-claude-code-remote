@@ -23,6 +23,7 @@ import { useNotificationPreferences } from '@/hooks/useNotificationPreferences';
 import { useSoundNotifications } from '@/hooks/useSoundNotifications';
 import { useSessionActions } from '@/hooks/useSessionActions';
 import { NotificationSettingsPanel } from '@/components/NotificationSettingsPanel';
+import { TokenCoveragePanel } from '@/components/TokenCoveragePanel';
 import { useSessionPolling, type SessionWithMachine } from '@/contexts/SessionPollingContext';
 // New layout components
 import { AppShell } from '@/components/layout';
@@ -120,6 +121,7 @@ export function HomeContent() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [unifiedManagerOpen, setUnifiedManagerOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
+  const [tokenCoverageOpen, setTokenCoverageOpen] = useState(false);
 
   // Edit machine modal state (for sidebar context menu)
   const [editingMachine, setEditingMachine] = useState<SidebarMachine | null>(null);
@@ -356,6 +358,15 @@ export function HomeContent() {
         <NotificationSettingsPanel />
       </SlideOverPanel>
 
+      {/* Token Coverage Slide-Over Panel */}
+      <SlideOverPanel
+        open={tokenCoverageOpen}
+        onClose={() => setTokenCoverageOpen(false)}
+        title="Token Coverage"
+      >
+        <TokenCoveragePanel />
+      </SlideOverPanel>
+
       {/* Edit Machine Modal - triggered from Sidebar */}
       {editingMachine && (
         <EditAgentModal
@@ -405,6 +416,7 @@ export function HomeContent() {
           isFullscreen={isFullscreen}
           onToggleFullscreen={() => setIsFullscreen((prev) => !prev)}
           onOpenNotificationSettings={() => setNotificationSettingsOpen(true)}
+          onOpenTokenCoverage={() => setTokenCoverageOpen(true)}
         >
           {/* Main content */}
           {selectedSession ? (
