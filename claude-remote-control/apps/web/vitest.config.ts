@@ -6,6 +6,12 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    exclude: [
+      '**/node_modules/**',
+      'tests/e2e/**',
+      'tests/integration/pairing/**',
+      '**/*.spec.ts',
+    ],
     reporters: ['dot'],
     coverage: {
       provider: 'v8',

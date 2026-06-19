@@ -47,3 +47,58 @@ jobs:
         with:
           files: ./claude-remote-control/apps/agent/coverage/lcov.info,./claude-remote-control/apps/web/coverage/lcov.info,./claude-remote-control/packages/shared/coverage/lcov.info
           fail_ci_if_error: false
+
+  web-e2e:
+    name: Web E2E Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./claude-remote-control
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: ./claude-remote-control/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm build
+        env:
+          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+          NEON_AUTH_BASE_URL: https://auth.example.com
+
+      - name: Install Playwright browsers
+        run: pnpm --filter 247-web exec playwright install --with-deps chromium
+
+      - name: Run web E2E tests
+        run: pnpm --filter 247-web test:e2e
+        env:
+          CI: true
+
+      - name: Run web integration tests
+        run: pnpm --filter 247-web test:integration:pairing
+        env:
+          CI: true
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-e2e-logs
+          path: |
+            claude-remote-control/apps/web/test-results/
+            claude-remote-control/apps/web/test-e2e.db
+          retention-days: 7

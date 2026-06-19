@@ -29,6 +29,10 @@ Thumbs.db
 # Testing
 coverage/
 .jscpd-report/
+test-e2e.db*
+test-integration.db*
+test-results/
+playwright-report/
 
 # Misc
 *.tsbuildinfo
