@@ -49,7 +49,10 @@ export async function GET(req: Request) {
     const ip = getClientIP(req);
 
     if (isRateLimited(ip)) {
-      return NextResponse.json({ error: 'Too many attempts' }, { status: 429 });
+      return NextResponse.json(
+        { error: 'Too many attempts. Please wait 10 minutes before trying again.' },
+        { status: 429 }
+      );
     }
 
     const { searchParams } = new URL(req.url);
@@ -63,7 +66,10 @@ export async function GET(req: Request) {
 
     if (!codeInfo) {
       recordFailure(ip);
-      return NextResponse.json({ error: 'Invalid or expired code' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Code not found. It may have expired or the dashboard restarted. Ask the agent to generate a new code.' },
+        { status: 404 }
+      );
     }
 
     resetFailures(ip);

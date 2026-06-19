@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { verifyToken, createToken, generateCode, pairingCodes } from '../../src/routes/pair.js';
+import {
+  verifyToken,
+  createToken,
+  generateCode,
+  pairingCodes,
+  registerCodeWithDashboard,
+  getDashboardUrl,
+  normalizeAgentUrlForPairing,
+  isLoopbackHost,
+} from '../../src/routes/pair.js';
 import { config } from '../../src/config.js';
 
 // Mock the config module
@@ -204,6 +213,334 @@ describe('Pairing Routes', () => {
 
       const stored = pairingCodes.get(code);
       expect(stored?.token).toBeUndefined();
+    });
+  });
+
+  describe('registerCodeWithDashboard', () => {
+    let fetchMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      fetchMock = vi.fn();
+      global.fetch = fetchMock as unknown as typeof fetch;
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('should POST code with correct payload shape to dashboard', async () => {
+      const code = '123456';
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      });
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '192.168.1.50:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const [url, options] = fetchMock.mock.calls[0];
+      expect(url).toBe(`${getDashboardUrl()}/api/pair/code`);
+      expect(options.method).toBe('POST');
+      expect(options.headers['Content-Type']).toBe('application/json');
+
+      const body = JSON.parse(options.body);
+      expect(body).toEqual({
+        code: '123456',
+        machineId: 'test-machine-id',
+        machineName: 'Test Machine',
+        agentUrl: '192.168.1.50:4678',
+        token: 'test-agent-auth-token-12345',
+      });
+    });
+
+    it('should re-register reused local code (web restart recovery)', async () => {
+      // Simulate agent has unexpired local code, web restarted, re-present triggers re-register
+      const code = '654321';
+      pairingCodes.set(code, {
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '10.0.0.5:4678',
+        token: config.dashboard?.apiKey,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      });
+
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      });
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '10.0.0.5:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // P4: assert payload shape for reused code (matches new-code test)
+      const [, reusedOpts] = fetchMock.mock.calls[0];
+      const reusedBody = JSON.parse(reusedOpts.body);
+      expect(reusedBody).toEqual({
+        code: '654321',
+        machineId: 'test-machine-id',
+        machineName: 'Test Machine',
+        agentUrl: '10.0.0.5:4678',
+        token: 'test-agent-auth-token-12345',
+      });
+    });
+
+    it('should reject loopback agentUrl (localhost)', async () => {
+      const code = '111111';
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: 'localhost:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('loopback');
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('should reject loopback agentUrl (127.0.0.1)', async () => {
+      const code = '222222';
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '127.0.0.1:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error).toContain('loopback');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('should reject loopback agentUrl (::1)', async () => {
+      const code = '333333';
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '[::1]:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('loopback');
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('should reject loopback agentUrl with protocol prefix (http://localhost)', async () => {
+      const code = '777777';
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: 'http://localhost:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('loopback');
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('should reject loopback agentUrl with protocol prefix (https://127.0.0.1)', async () => {
+      const code = '888888';
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: 'https://127.0.0.1:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('loopback');
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('should reject loopback agentUrl in 127.x.x.x range', async () => {
+      const code = '999999';
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '127.0.0.2:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('loopback');
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('should surface registration failure (non-2xx response)', async () => {
+      const code = '444444';
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: 'Internal server error' }),
+      });
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '192.168.1.100:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('registration failed');
+      }
+    });
+
+    it('should surface registration failure (fetch error)', async () => {
+      const code = '555555';
+      fetchMock.mockRejectedValueOnce(new Error('Network error'));
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '192.168.1.100:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('registration failed');
+      }
+    });
+
+    it('should timeout on hung dashboard', async () => {
+      const code = '666666';
+      // Simulate fetch hanging — but honor the AbortSignal so the timeout fires
+      fetchMock.mockImplementationOnce(
+        (_url: string, opts: { signal?: AbortSignal }) =>
+          new Promise<never>((_resolve, reject) => {
+            if (opts?.signal) {
+              opts.signal.addEventListener('abort', () => {
+                const err = new Error('The operation was aborted');
+                err.name = 'TimeoutError';
+                reject(err);
+              });
+            }
+            // Never resolves otherwise — signal abort is the only exit
+          })
+      );
+
+      const result = await registerCodeWithDashboard({
+        code,
+        machineId: config.machine.id,
+        machineName: config.machine.name,
+        agentUrl: '192.168.1.100:4678',
+        token: config.dashboard?.apiKey,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain('timeout');
+      }
+    }, 15000); // 15s — AbortSignal.timeout is 5s inside the helper
+  });
+
+  describe('normalizeAgentUrlForPairing', () => {
+    it('strips http:// prefix', () => {
+      expect(normalizeAgentUrlForPairing('http://192.168.1.50:4678')).toBe('192.168.1.50:4678');
+    });
+
+    it('strips https:// prefix', () => {
+      expect(normalizeAgentUrlForPairing('https://192.168.1.50:4678')).toBe('192.168.1.50:4678');
+    });
+
+    it('strips repeated protocol prefixes (e.g. https://http://host)', () => {
+      expect(normalizeAgentUrlForPairing('https://http://192.168.1.50:4678')).toBe('192.168.1.50:4678');
+    });
+
+    it('strips path component after host:port', () => {
+      expect(normalizeAgentUrlForPairing('192.168.1.50:4678/extra/path')).toBe('192.168.1.50:4678');
+    });
+
+    it('strips path after protocol strip', () => {
+      expect(normalizeAgentUrlForPairing('https://192.168.1.50:4678/extra/path')).toBe('192.168.1.50:4678');
+    });
+
+    it('returns empty string for empty input', () => {
+      expect(normalizeAgentUrlForPairing('')).toBe('');
+    });
+
+    it('leaves bare host:port unchanged', () => {
+      expect(normalizeAgentUrlForPairing('machine.tailnet.ts.net:4678')).toBe('machine.tailnet.ts.net:4678');
+    });
+  });
+
+  describe('isLoopbackHost — additional edge cases', () => {
+    it('detects bare ::1 without brackets', () => {
+      expect(isLoopbackHost('::1')).toBe(true);
+    });
+
+    it('detects bare ::1 with port notation (::1:4678) as loopback', () => {
+      // After normalize: '::1:4678' has multiple colons → kept as-is, matches ::1 in Set check
+      // NOTE: this form is ambiguous but we treat it conservatively as loopback
+      expect(isLoopbackHost('::1:4678')).toBe(true);
+    });
+
+    it('rejects 0.0.0.0 as loopback/non-reachable', () => {
+      expect(isLoopbackHost('0.0.0.0')).toBe(true);
+    });
+
+    it('rejects 0.0.0.0 with port', () => {
+      expect(isLoopbackHost('0.0.0.0:4678')).toBe(true);
+    });
+
+    it('handles malformed bracket [::1 (no closing ]) as loopback', () => {
+      expect(isLoopbackHost('[::1')).toBe(true);
+    });
+
+    it('does not flag valid LAN IP as loopback', () => {
+      expect(isLoopbackHost('192.168.1.50:4678')).toBe(false);
+    });
+
+    it('does not flag Tailscale hostname as loopback', () => {
+      expect(isLoopbackHost('machine.tailnet.ts.net:4678')).toBe(false);
     });
   });
 });

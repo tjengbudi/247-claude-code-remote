@@ -65,7 +65,10 @@ export async function POST(req: Request) {
     const ip = getClientIP(req);
 
     if (isRateLimited(ip)) {
-      return NextResponse.json({ error: 'Too many attempts' }, { status: 429 });
+      return NextResponse.json(
+        { error: 'Too many attempts. Please wait 10 minutes before trying again.' },
+        { status: 429 }
+      );
     }
 
     const body = await req.json();
@@ -77,8 +80,15 @@ export async function POST(req: Request) {
 
       if (!codeInfo) {
         recordFailure(ip);
+        // AC4: distinguish "expired or dashboard restarted" from "wrong code".
+        // The web store is volatile (NFR6) — restart wipes all outstanding codes.
+        // A lookup miss after restart is NOT "wrong code"; it's "store evaporated".
         return NextResponse.json(
-          { valid: false, error: 'Invalid or expired code' },
+          {
+            valid: false,
+            error:
+              'Code not found. It may have expired or the dashboard restarted. Ask the agent to generate a new code.',
+          },
           { status: 400 }
         );
       }

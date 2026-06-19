@@ -675,7 +675,6 @@ export function AgentConnectionSettings({
                         <input
                           type="text"
                           placeholder="000000"
-                          maxLength={6}
                           className={cn(
                             'flex-1 rounded-lg px-4 py-2.5',
                             'border border-white/10 bg-white/5',
@@ -685,14 +684,18 @@ export function AgentConnectionSettings({
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               const input = e.target as HTMLInputElement;
-                              if (input.value.length === 6) {
-                                window.location.href = `/connect?code=${input.value}`;
+                              const normalized = input.value.replace(/\D/g, '').slice(0, 6);
+                              if (normalized.length === 6) {
+                                window.location.href = `/connect?code=${normalized}`;
                               }
                             }
                           }}
                           onChange={(e) => {
-                            // Only allow digits
-                            e.target.value = e.target.value.replace(/\D/g, '');
+                            // AC3 fix: strip non-digits then clamp to 6 BEFORE length check.
+                            // Fixes paste gap: "123-456" → "123456", " 123456 " → "123456".
+                            // Server has NO trim tolerance (PREP CORRECTION #2), so client must
+                            // produce exactly 6 digits.
+                            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6);
                           }}
                         />
                         <button
@@ -700,8 +703,9 @@ export function AgentConnectionSettings({
                             const input = (e.target as HTMLElement)
                               .closest('div')
                               ?.querySelector('input') as HTMLInputElement;
-                            if (input?.value.length === 6) {
-                              window.location.href = `/connect?code=${input.value}`;
+                            const normalized = input?.value.replace(/\D/g, '').slice(0, 6);
+                            if (normalized?.length === 6) {
+                              window.location.href = `/connect?code=${normalized}`;
                             }
                           }}
                           className={cn(

@@ -3,6 +3,12 @@
  * Codes are registered by agents and looked up by users.
  * TTL: 5 minutes. Codes are multi-use within the TTL — lookupPairingCode does
  * NOT consume the code; only expiry (swept every minute) removes it.
+ *
+ * AC4 RESIDUAL RISKS (Story 5.3):
+ * - 6-digit collision: negligible (1M code space × 5-min TTL, agents retry on collision)
+ * - Web-restart invalidation: single-instance in-memory store (NFR6), restart wipes all codes
+ *   → post-restart lookup miss is "regenerate code", not "wrong code" (see validate/route.ts message)
+ * - Rate limit: 5 failures/IP/10-min → 429 (pair-rate-limit.ts), guards brute-force of 6-digit space
  */
 
 export interface PairingCodeInfo {

@@ -86,6 +86,141 @@ function getAgentUrl(): string {
   return `localhost:${port}`;
 }
 
+/**
+ * Strip protocol prefix and path from a URL, returning host[:port].
+ * Path A and manual connection storage both persist without protocol;
+ * URL builders add it back later (web utils.ts:28-39).
+ */
+export function normalizeAgentUrlForPairing(url: string): string {
+  if (!url) return '';
+  let normalized = url.trim();
+  // Strip all leading http:// or https:// prefixes with a single greedy pass
+  normalized = normalized.replace(/^(https?:\/\/)+/, '');
+  // Strip any path component after host[:port] and trailing slashes
+  const slashIdx = normalized.indexOf('/');
+  if (slashIdx !== -1) {
+    normalized = normalized.slice(0, slashIdx);
+  }
+  return normalized;
+}
+
+/**
+ * Escape HTML entities to prevent XSS when interpolating into HTML templates.
+ */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Detect loopback/non-reachable hosts. After protocol strip, the host portion
+ * is checked against known loopback shapes: localhost, 127.x.x.x, ::1.
+ * A loopback URL produces a code the browser cannot reach from another machine.
+ */
+export function isLoopbackHost(url: string): boolean {
+  const host = normalizeAgentUrlForPairing(url);
+  if (!host) return false;
+
+  // Extract host without port (handle both host:port and [::1]:port)
+  let hostOnly = host;
+  if (hostOnly.startsWith('[')) {
+    // IPv6 bracket notation: [::1]:4678 → ::1
+    const bracketEnd = hostOnly.indexOf(']');
+    if (bracketEnd > 0) {
+      hostOnly = hostOnly.slice(1, bracketEnd);
+    } else {
+      // Malformed bracket like [::1 — treat as non-reachable
+      hostOnly = hostOnly.slice(1);
+    }
+  } else if (hostOnly.includes(':')) {
+    const parts = hostOnly.split(':');
+    if (parts.length > 2) {
+      // Multiple colons = bare IPv6. Check for loopback before stripping port.
+      // ::1 alone or ::1:<port> (ambiguous notation without brackets) → loopback
+      if (/^::1(:\d+)?$/.test(hostOnly)) return true;
+      // Leave hostOnly for Set check below (will not match, correctly passes)
+    } else {
+      hostOnly = parts[0] || '';
+    }
+  }
+
+  const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
+  if (LOOPBACK_HOSTS.has(hostOnly)) return true;
+  // Also match any 127.x.x.x (IPv4 loopback range) with strict octet validation
+  if (/^127\.(25[0-5]|2[0-4]\d|1\d{2}|\d{1,2})\.(25[0-5]|2[0-4]\d|1\d{2}|\d{1,2})\.(25[0-5]|2[0-4]\d|1\d{2}|\d{1,2})$/.test(hostOnly)) return true;
+  return false;
+}
+
+/**
+ * Register a pairing code with the dashboard's web store over HTTP.
+ *
+ * AC1: posts {code, machineId, machineName, agentUrl, token} to {dashboardUrl}/api/pair/code.
+ * AC2: rejects loopback agentUrl before registering.
+ * Trap #5: surfaces failure to operator, never silently returns a dead code.
+ * Uses AbortSignal.timeout to match validate/route.ts's 5s pattern.
+ *
+ * Returns { success: true } on 2xx, or { success: false, error } on failure.
+ *
+ * AC4 RESIDUAL RISKS (documented per story spec):
+ * - 6-digit collision: negligible (1M code space × 5-min TTL, generateCode retries on collision)
+ * - Web-restart invalidation: dashboard is single-instance in-memory (NFR6), restart wipes codes
+ *   → post-restart lookup miss is "regenerate", not "wrong code"
+ */
+export async function registerCodeWithDashboard(params: {
+  code: string;
+  machineId: string;
+  machineName: string;
+  agentUrl: string;
+  token?: string;
+}): Promise<{ success: true } | { success: false; error: string }> {
+  // AC2: loopback guard — reject before making a network call
+  if (isLoopbackHost(params.agentUrl)) {
+    return {
+      success: false,
+      error: `loopback agentUrl rejected: "${params.agentUrl}" is not reachable from the browser. Set config.agent.url to a LAN/Tailnet address.`,
+    };
+  }
+
+  const dashboardUrl = getDashboardUrl();
+  const normalizedAgentUrl = normalizeAgentUrlForPairing(params.agentUrl);
+
+  try {
+    const res = await fetch(`${dashboardUrl}/api/pair/code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: params.code,
+        machineId: params.machineId,
+        machineName: params.machineName,
+        agentUrl: normalizedAgentUrl,
+        token: params.token,
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const msg = (body as { error?: string }).error || `HTTP ${res.status}`;
+      return {
+        success: false,
+        error: `registration failed: dashboard returned ${msg}`,
+      };
+    }
+
+    return { success: true };
+  } catch (err) {
+    const reason =
+      err instanceof Error && err.name === 'TimeoutError'
+        ? 'timeout: dashboard did not respond within 5s'
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    return {
+      success: false,
+      error: `registration failed: ${reason}`,
+    };
+  }
+}
+
 // Get dashboard URL
 function getDashboardUrl(): string {
   // Use config if available, otherwise default to production
@@ -109,7 +244,7 @@ export function createPairRoutes(): Router {
   const router = Router();
 
   // GET /pair - HTML page with pairing info
-  router.get('/', (_req, res) => {
+  router.get('/', async (_req, res) => {
     const machineId = config.machine.id;
     const machineName = config.machine.name;
     const agentUrl = getAgentUrl();
@@ -152,11 +287,33 @@ export function createPairRoutes(): Router {
         return newCode;
       })();
 
+    // AC1: Register code with dashboard web store (both new and reused codes)
+    let registrationError: string | undefined;
+    const regResult = await registerCodeWithDashboard({
+      code,
+      machineId,
+      machineName,
+      agentUrl,
+      token: config.dashboard?.apiKey,
+    });
+    // AC3: always print code to stdout so headless operators see it regardless of registration outcome
+    console.log(`[pair] Pairing code: ${code}`);
+    if (!regResult.success) {
+      registrationError = regResult.error;
+      console.error(`[pair] Code registration failed: ${registrationError}`);
+    } else {
+      console.log(`[pair] Code registered with dashboard (${dashboardUrl})`);
+    }
+
     const pairingLink = `${dashboardUrl}/connect?token=${encodeURIComponent(token)}`;
     const qrCodeSvg = generateQRCodeSVG(pairingLink);
 
-    // Calculate time remaining
-    const codeData = pairingCodes.get(code)!;
+    // Calculate time remaining — guard against cleanup-interval eviction between selection and access
+    const codeData = pairingCodes.get(code);
+    if (!codeData) {
+      res.status(500).json({ error: 'Pairing code evicted; please refresh to generate a new code.' });
+      return;
+    }
     const secondsRemaining = Math.floor((codeData.expiresAt - Date.now()) / 1000);
 
     const html = `<!DOCTYPE html>
@@ -287,13 +444,22 @@ export function createPairRoutes(): Router {
       padding-top: 16px;
       border-top: 1px solid rgba(255, 255, 255, 0.1);
     }
+    .registration-error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 24px;
+      color: #fca5a5;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="machine-icon">💻</div>
     <h1>Pair Your Agent</h1>
-    <p class="machine-name">${machineName}</p>
+    <p class="machine-name">${escapeHtml(machineName)}</p>
 
     <div class="qr-section">
       ${qrCodeSvg}
@@ -311,11 +477,13 @@ export function createPairRoutes(): Router {
       <p class="expires">Expires in <span id="countdown">${Math.floor(secondsRemaining / 60)}:${String(secondsRemaining % 60).padStart(2, '0')}</span></p>
     </div>
 
+    ${registrationError ? `<div class="registration-error">⚠️ Registration failed: ${escapeHtml(registrationError)}</div>` : ''}
+
     <p class="refresh-note">Page will auto-refresh when code expires</p>
 
     <p class="agent-info">
-      Agent URL: ${agentUrl}<br>
-      Machine ID: ${machineId}
+      Agent URL: ${escapeHtml(agentUrl)}<br>
+      Machine ID: ${escapeHtml(machineId)}
     </p>
   </div>
 
@@ -342,7 +510,7 @@ export function createPairRoutes(): Router {
   });
 
   // GET /pair/info - JSON API for pairing info
-  router.get('/info', (_req, res) => {
+  router.get('/info', async (_req, res) => {
     const machineId = config.machine.id;
     const machineName = config.machine.name;
     const agentUrl = getAgentUrl();
@@ -385,7 +553,32 @@ export function createPairRoutes(): Router {
         return newCode;
       })();
 
-    const codeData = pairingCodes.get(code)!;
+    // Guard against cleanup-interval eviction between selection and access
+    const codeData = pairingCodes.get(code);
+    if (!codeData) {
+      res.status(500).json({ error: 'Pairing code evicted; please retry.' });
+      return;
+    }
+
+    // AC1: Register code with dashboard web store (both new and reused codes)
+    let registrationStatus: 'success' | 'failed' = 'success';
+    let registrationError: string | undefined;
+    const regResult = await registerCodeWithDashboard({
+      code,
+      machineId,
+      machineName,
+      agentUrl,
+      token: config.dashboard?.apiKey,
+    });
+    // AC3: always print code to stdout so headless operators see it
+    console.log(`[pair] Pairing code: ${code}`);
+    if (!regResult.success) {
+      registrationStatus = 'failed';
+      registrationError = regResult.error;
+      console.error(`[pair] Code registration failed: ${registrationError}`);
+    } else {
+      console.log(`[pair] Code registered with dashboard (${dashboardUrl})`);
+    }
 
     res.json({
       machineId,
@@ -395,6 +588,8 @@ export function createPairRoutes(): Router {
       code,
       pairingLink: `${dashboardUrl}/connect?token=${encodeURIComponent(token)}`,
       expiresAt: codeData.expiresAt,
+      registrationStatus,
+      ...(registrationError ? { registrationError } : {}),
     });
   });
 
