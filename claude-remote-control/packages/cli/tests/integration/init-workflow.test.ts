@@ -274,8 +274,18 @@ describe('247 init workflow', () => {
       await initCommand.parseAsync(['node', '247', 'init', '--force', '--name', 'n1']);
       const afterFirst = JSON.parse(fsState.files.get(mockPaths.configPath)!);
 
+      // Story 5.6 (D3 fix): fresh Commander instance via resetModules + re-import,
+      // mirroring the canonical pattern in full-lifecycle.test.ts:199,220,263,276,284.
+      // fsState closure survives resetModules because mock factories reference the
+      // test-file-scope closure, not the re-evaluated module state.
+      vi.resetModules();
+      const { initCommand: initCommand2 } = await import('../../src/commands/init.js');
+      // Prove resetModules actually swapped the Command instance — guards against a
+      // silent no-op that would let stale carry-state bleed into the second parse.
+      expect(initCommand2).not.toBe(initCommand);
+
       // Second --force run
-      await initCommand.parseAsync(['node', '247', 'init', '--force', '--name', 'n2']);
+      await initCommand2.parseAsync(['node', '247', 'init', '--force', '--name', 'n2']);
       const afterSecond = JSON.parse(fsState.files.get(mockPaths.configPath)!);
 
       // machine.id preserved across both runs
