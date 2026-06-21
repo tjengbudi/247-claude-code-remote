@@ -66,10 +66,7 @@ export async function GET(req: Request) {
 
     if (!codeInfo) {
       recordFailure(ip);
-      return NextResponse.json(
-        { error: 'Code not found. It may have expired or the dashboard restarted. Ask the agent to generate a new code.' },
-        { status: 404 }
-      );
+      return NextResponse.json({ valid: false }, { status: 200 });
     }
 
     resetFailures(ip);
