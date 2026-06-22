@@ -26,19 +26,21 @@ import AuthPage from '@/app/auth/[path]/page';
 // the page's useEffect (which has `router` in deps) re-fire on every
 // re-render, calling getSession() multiple times and clobbering state set by
 // submit handlers (e.g. 409 → phase='login' gets overridden back to 'bootstrap').
-const { push, replace, searchState, router } = vi.hoisted(() => {
+const { push, replace, searchState, router, paramsState } = vi.hoisted(() => {
   const push = vi.fn();
   const replace = vi.fn();
   const searchState = { current: '' };
+  // Mutable so tests can switch the [path] segment (e.g. 'signup') before render.
+  const paramsState = { path: 'sign-in' };
   const router = { push, replace, prefetch: vi.fn(), back: vi.fn() };
-  return { push, replace, searchState, router };
+  return { push, replace, searchState, router, paramsState };
 });
 
 vi.mock('next/navigation', () => ({
   useRouter: () => router,
-  usePathname: () => '/auth/sign-in',
+  usePathname: () => `/auth/${paramsState.path}`,
   useSearchParams: () => new URLSearchParams(searchState.current),
-  useParams: () => ({ path: 'sign-in' }),
+  useParams: () => ({ path: paramsState.path }),
 }));
 
 // ─── Capture getSession mock ──────────────────────────────────────────────────
@@ -105,6 +107,7 @@ describe('AuthPage (Story 4.3)', () => {
       ownerExists: true,
     });
     searchState.current = '';
+    paramsState.path = 'sign-in';
     fetchSpy = vi.fn();
     global.fetch = fetchSpy as unknown as typeof fetch;
   });
@@ -842,6 +845,114 @@ describe('AuthPage (Story 4.3)', () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(replace).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Signup route (/auth/signup) — multi-user registration ──────────────────
+  describe('signup route (multi-user)', () => {
+    function getSignupForm() {
+      return screen.getByRole('heading', { name: /create your account/i });
+    }
+
+    it('renders the signup form on /auth/signup even when an owner exists', async () => {
+      paramsState.path = 'signup';
+      mockGetSession.mockResolvedValueOnce({
+        data: { user: null },
+        ownerExists: true,
+      });
+      renderPage();
+      await waitFor(() => {
+        expect(getSignupForm()).toBeTruthy();
+        // Subtitle distinguishes signup from first-run bootstrap copy.
+        expect(screen.getByText(/sign up to get started/i)).toBeTruthy();
+        expect(screen.getByLabelText(/confirm password/i)).toBeTruthy();
+      });
+    });
+
+    it('POSTs /api/auth/signup and redirects to / on 201', async () => {
+      paramsState.path = 'signup';
+      setFetchResponse('/api/auth/signup', jsonResponse({ data: { user: {} } }, 201));
+      renderPage();
+      await waitFor(() => getSignupForm());
+
+      fireEvent.change(screen.getByLabelText(/^username$/i), {
+        target: { value: 'alice' },
+      });
+      fireEvent.change(screen.getByLabelText(/^password$/i), {
+        target: { value: 'password123' },
+      });
+      fireEvent.change(screen.getByLabelText(/confirm password/i), {
+        target: { value: 'password123' },
+      });
+      fireEvent.submit(screen.getByRole('button', { name: /create account/i }));
+
+      await waitFor(() => {
+        expect(fetchSpy).toHaveBeenCalledWith(
+          '/api/auth/signup',
+          expect.objectContaining({
+            method: 'POST',
+            body: JSON.stringify({ username: 'alice', password: 'password123' }),
+          }),
+        );
+      });
+      await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+    });
+
+    it('shows inline "Username already taken" on 409 and does NOT redirect', async () => {
+      paramsState.path = 'signup';
+      setFetchResponse(
+        '/api/auth/signup',
+        jsonResponse({ error: 'Username already taken' }, 409),
+      );
+      renderPage();
+      await waitFor(() => getSignupForm());
+
+      fireEvent.change(screen.getByLabelText(/^username$/i), {
+        target: { value: 'alice' },
+      });
+      fireEvent.change(screen.getByLabelText(/^password$/i), {
+        target: { value: 'password123' },
+      });
+      fireEvent.change(screen.getByLabelText(/confirm password/i), {
+        target: { value: 'password123' },
+      });
+      fireEvent.submit(screen.getByRole('button', { name: /create account/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('alert').textContent).toMatch(/username already taken/i);
+      });
+      // Still on the signup form, no navigation.
+      expect(getSignupForm()).toBeTruthy();
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it('does NOT POST and shows inline error when password < 8 chars', async () => {
+      paramsState.path = 'signup';
+      renderPage();
+      await waitFor(() => getSignupForm());
+
+      fireEvent.change(screen.getByLabelText(/^username$/i), {
+        target: { value: 'alice' },
+      });
+      fireEvent.change(screen.getByLabelText(/^password$/i), {
+        target: { value: 'short' },
+      });
+      fireEvent.change(screen.getByLabelText(/confirm password/i), {
+        target: { value: 'short' },
+      });
+      fireEvent.submit(screen.getByRole('button', { name: /create account/i }));
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(screen.getByRole('alert')).toBeTruthy();
+    });
+
+    it('login form links to /auth/signup', async () => {
+      // Default beforeEach: logged-out, ownerExists true → login form.
+      renderPage();
+      await waitFor(() => getLoginForm());
+
+      const link = screen.getByRole('link', { name: /create account/i });
+      expect(link.getAttribute('href')).toBe('/auth/signup');
     });
   });
 });

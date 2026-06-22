@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, useParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth/client';
 import { Button } from '@/components/ui/button';
 
-type Phase = 'loading' | 'login' | 'bootstrap' | 'redirecting';
+type Phase = 'loading' | 'login' | 'bootstrap' | 'signup' | 'redirecting';
 
 // Accept only same-origin relative paths. Reject `//evil`, `/\evil`, `https://...`.
 // `connect/page.tsx` passes an absolute URL — we parse it and only honor the
@@ -50,7 +50,14 @@ interface FormFieldError {
 function AuthContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const params = useParams();
   const { getSession } = useAuth();
+
+  // The [path] catch-all segment drives form selection by URL: `/auth/signup`
+  // always offers registration (multi-user), while `/auth/sign-in` keeps the
+  // session-driven login/first-run-bootstrap behavior.
+  const pathSeg = Array.isArray(params?.path) ? params.path[0] : params?.path;
+  const isSignupRoute = pathSeg === 'signup';
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +102,13 @@ function AuthContent() {
         router.replace('/');
         return;
       }
+      // `/auth/signup` is always open for additional accounts, regardless of
+      // whether an owner already exists. (First-run bootstrap stays on the
+      // sign-in route via the ownerExists branch below.)
+      if (isSignupRoute) {
+        setPhase('signup');
+        return;
+      }
       if (ownerExists === false) {
         setPhase('bootstrap');
       } else if (ownerExists === true) {
@@ -105,7 +119,7 @@ function AuthContent() {
         setUnknownNotice(true);
       }
     },
-    [router],
+    [router, isSignupRoute],
   );
 
   // Initial session fetch
@@ -260,6 +274,77 @@ function AuthContent() {
     }
   };
 
+  // ─── Signup submit ───────────────────────────────────────────────────────────
+  // Mirrors handleBootstrap (same client validation + bs* fields, which never
+  // render alongside the signup form) but hits /api/auth/signup and treats a
+  // 409 as a username-taken field error instead of flipping to login.
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setFieldError(null);
+
+    // Client validation (mirror server: non-blank username, ≥8 chars, confirm match)
+    if (!bsUsername.trim()) {
+      setFieldError({ field: 'username', message: 'Username is required' });
+      bsUsernameRef.current?.focus();
+      return;
+    }
+    if (bsPassword.length < 8) {
+      setFieldError({
+        field: 'password',
+        message: 'Password must be at least 8 characters',
+      });
+      bsPasswordRef.current?.focus();
+      return;
+    }
+    if (bsConfirm !== bsPassword) {
+      setFieldError({
+        field: 'confirmPassword',
+        message: 'Passwords do not match',
+      });
+      bsConfirmRef.current?.focus();
+      return;
+    }
+
+    setPending(true);
+    try {
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: bsUsername.trim(), password: bsPassword }),
+      });
+      if (!mountedRef.current) return;
+      if (res.ok) {
+        // Cookie already set (best-effort auto-login); honor returnTo like login.
+        setPhase('redirecting');
+        router.replace(safeReturnTo(searchParams.get('returnTo') ?? ''));
+        return;
+      } else if (res.status === 409) {
+        setFieldError({ field: 'username', message: 'Username already taken' });
+        bsUsernameRef.current?.focus();
+      } else if (res.status === 400) {
+        const body = await safeJson(res);
+        const msg =
+          typeof body?.error === 'string' ? body.error : 'Missing username or password';
+        // Password-length messages go to the password field, everything else
+        // to username (same mapping as handleBootstrap).
+        if (/password/i.test(msg) && /\d/.test(msg)) {
+          setFieldError({ field: 'password', message: msg });
+          bsPasswordRef.current?.focus();
+        } else {
+          setFieldError({ field: 'username', message: msg });
+          bsUsernameRef.current?.focus();
+        }
+      } else {
+        setError('Something went wrong. Please try again.');
+      }
+    } catch {
+      if (mountedRef.current) setError('Something went wrong. Please try again.');
+    } finally {
+      if (mountedRef.current) setPending(false);
+    }
+  };
+
   // ─── Spinner for loading / redirecting ───────────────────────────────────────
   if (phase === 'loading' || phase === 'redirecting') {
     return (
@@ -377,6 +462,120 @@ function AuthContent() {
     );
   }
 
+  // ─── Signup form (phase === 'signup') ────────────────────────────────────────
+  if (phase === 'signup') {
+    const errorId = 'auth-error';
+    const hasError = error !== null || fieldError !== null;
+    return (
+      <div className="bg-background flex min-h-screen items-center justify-center">
+        <div className="w-full max-w-md p-8">
+          <h1 className="mb-8 text-center text-2xl font-bold">247</h1>
+          <h2 className="mb-2 text-center text-lg font-semibold">Create your account</h2>
+          <p className="mb-6 text-center text-sm text-white/60">
+            Sign up to get started.
+          </p>
+          <form onSubmit={handleSignup} noValidate className="space-y-4">
+            <div>
+              <label
+                htmlFor="su-username"
+                className="mb-1 block text-sm font-medium text-white/80"
+              >
+                Username
+              </label>
+              <input
+                id="su-username"
+                ref={bsUsernameRef}
+                type="text"
+                name="username"
+                autoComplete="username"
+                value={bsUsername}
+                onChange={(e) => setBsUsername(e.target.value)}
+                aria-invalid={fieldError?.field === 'username' ? 'true' : undefined}
+                aria-describedby={
+                  fieldError?.field === 'username' ? errorId : undefined
+                }
+                className="w-full rounded-md border border-white/20 bg-white/5 px-3 py-2 text-white placeholder-white/40 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="su-password"
+                className="mb-1 block text-sm font-medium text-white/80"
+              >
+                Password
+              </label>
+              <input
+                id="su-password"
+                ref={bsPasswordRef}
+                type="password"
+                name="password"
+                autoComplete="new-password"
+                value={bsPassword}
+                onChange={(e) => setBsPassword(e.target.value)}
+                aria-invalid={fieldError?.field === 'password' ? 'true' : undefined}
+                aria-describedby={
+                  fieldError?.field === 'password' ? errorId : undefined
+                }
+                className="w-full rounded-md border border-white/20 bg-white/5 px-3 py-2 text-white placeholder-white/40 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="su-confirm"
+                className="mb-1 block text-sm font-medium text-white/80"
+              >
+                Confirm password
+              </label>
+              <input
+                id="su-confirm"
+                ref={bsConfirmRef}
+                type="password"
+                name="confirmPassword"
+                autoComplete="new-password"
+                value={bsConfirm}
+                onChange={(e) => setBsConfirm(e.target.value)}
+                aria-invalid={
+                  fieldError?.field === 'confirmPassword' ? 'true' : undefined
+                }
+                aria-describedby={
+                  fieldError?.field === 'confirmPassword' ? errorId : undefined
+                }
+                className="w-full rounded-md border border-white/20 bg-white/5 px-3 py-2 text-white placeholder-white/40 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+              />
+            </div>
+
+            {hasError && (
+              <div
+                id={errorId}
+                role="alert"
+                className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400"
+              >
+                {fieldError?.message ?? error}
+              </div>
+            )}
+
+            <Button type="submit" disabled={pending} className="w-full">
+              {pending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Creating account…
+                </>
+              ) : (
+                'Create account'
+              )}
+            </Button>
+          </form>
+          <p className="mt-6 text-center text-sm text-white/60">
+            Already have an account?{' '}
+            <a href="/auth/sign-in" className="text-orange-400 underline hover:text-orange-300">
+              Sign in
+            </a>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Login form (phase === 'login') ──────────────────────────────────────────
   const errorId = 'auth-error';
   const hasError = error !== null || fieldError !== null;
@@ -468,6 +667,12 @@ function AuthContent() {
             )}
           </Button>
         </form>
+        <p className="mt-6 text-center text-sm text-white/60">
+          New here?{' '}
+          <a href="/auth/signup" className="text-orange-400 underline hover:text-orange-300">
+            Create account
+          </a>
+        </p>
       </div>
     </div>
   );
