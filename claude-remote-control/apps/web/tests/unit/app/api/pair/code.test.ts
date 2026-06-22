@@ -31,16 +31,16 @@ describe('GET /api/pair/code', () => {
     expect(data.error).toContain('10 minutes');
   });
 
-  it('returns 404 with restart-aware message when code not found', async () => {
+  it('returns 200 { valid: false } when code not found', async () => {
     vi.mocked(pairingCodes.lookupPairingCode).mockReturnValue(null);
 
     const response = await GET(makeGetRequest('999999'));
     const data = await response.json();
 
-    expect(response.status).toBe(404);
-    expect(data.error).toContain('expired');
-    expect(data.error).toContain('dashboard restarted');
-    expect(data.error).toContain('generate a new code');
+    // Unknown/expired codes resolve cleanly (not a 404) so the pairing client
+    // can distinguish "wrong code" from a transport error and prompt a retry.
+    expect(response.status).toBe(200);
+    expect(data.valid).toBe(false);
   });
 
   it('returns 200 with code info when found', async () => {
