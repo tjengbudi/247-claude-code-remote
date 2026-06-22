@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import { createHmac } from 'crypto';
+import { networkInterfaces } from 'os';
 import { config } from '../config.js';
 
 // In-memory store for pairing codes (6-digit codes with 5-minute expiry)
@@ -77,12 +78,52 @@ export function verifyToken(
   }
 }
 
-// Get agent URL - prefer config, fallback to localhost
+/**
+ * Detect a reachable LAN IPv4 address for this machine.
+ *
+ * Picks the first non-internal IPv4 interface, preferring RFC-1918 private
+ * ranges (192.168/16, 10/8, 172.16–31/12) so the browser on another device can
+ * reach the agent. Skips loopback (127.x), link-local (169.254.x), and internal
+ * interfaces. Returns null when no candidate exists (e.g. loopback-only host).
+ */
+export function getLocalNetworkIp(): string | null {
+  const isPrivate = (ip: string): boolean =>
+    /^192\.168\./.test(ip) ||
+    /^10\./.test(ip) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+
+  let fallback: string | null = null;
+  const ifaces = networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] ?? []) {
+      // Node 18+ reports family as the string 'IPv4'; older as number 4.
+      const isIPv4 = iface.family === 'IPv4' || (iface.family as unknown) === 4;
+      if (!isIPv4 || iface.internal) continue;
+      if (/^169\.254\./.test(iface.address)) continue; // link-local
+      if (isPrivate(iface.address)) return iface.address; // best candidate
+      if (!fallback) fallback = iface.address; // public/other — keep as fallback
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Resolve the URL the agent advertises to the dashboard during pairing.
+ * Priority:
+ *   1. config.agent.url        — explicit operator setting (never overridden)
+ *   2. detected LAN IPv4        — reachable from other devices on the network
+ *   3. localhost:<port>         — last resort; rejected by the loopback guard
+ *      in the QR/token routes so it is never silently embedded in a token.
+ */
 function getAgentUrl(): string {
   if (config.agent?.url) {
     return config.agent.url;
   }
   const port = config.agent?.port || 4678;
+  const lanIp = getLocalNetworkIp();
+  if (lanIp) {
+    return `${lanIp}:${port}`;
+  }
   return `localhost:${port}`;
 }
 
@@ -240,6 +281,47 @@ function generateQRCodeSVG(data: string): string {
   return `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encoded}" alt="QR Code" width="200" height="200" style="image-rendering: pixelated;" />`;
 }
 
+/**
+ * Build the operator-facing message shown when the resolved agent URL is a
+ * loopback address — unreachable from the browser, so pairing it would silently
+ * produce a dead connection. Mirrors registerCodeWithDashboard's AC2 message.
+ */
+export function loopbackErrorMessage(agentUrl: string): string {
+  return (
+    `Agent URL resolved to loopback ("${agentUrl}") and is not reachable from your browser. ` +
+    `Set "agent.url" to a LAN or Tailnet address in ~/.247/config.json, then restart the agent.`
+  );
+}
+
+/** Minimal HTML error page for the loopback guard on GET /pair. */
+function loopbackErrorPage(agentUrl: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pairing unavailable</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0a0a10 0%, #1a1a2e 100%); color: #e6e6f0;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .card { max-width: 480px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px; padding: 32px; }
+    h1 { font-size: 18px; margin-bottom: 12px; color: #f59e0b; }
+    p { font-size: 14px; line-height: 1.6; color: #c8c8d4; }
+    code { font-family: ui-monospace, monospace; background: rgba(255,255,255,0.06);
+      padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>⚠️ Pairing unavailable</h1>
+    <p>${escapeHtml(loopbackErrorMessage(agentUrl))}</p>
+  </div>
+</body>
+</html>`;
+}
+
 export function createPairRoutes(): Router {
   const router = Router();
 
@@ -249,6 +331,13 @@ export function createPairRoutes(): Router {
     const machineName = config.machine.name;
     const agentUrl = getAgentUrl();
     const dashboardUrl = getDashboardUrl();
+
+    // Loopback guard: never embed an unreachable localhost URL into a pairing
+    // token/code. Fail loud so the operator sets a LAN/Tailnet agent.url.
+    if (isLoopbackHost(agentUrl)) {
+      res.status(409).type('html').send(loopbackErrorPage(agentUrl));
+      return;
+    }
 
     // Create token (5 minute expiry)
     const token = createToken(
@@ -515,6 +604,13 @@ export function createPairRoutes(): Router {
     const machineName = config.machine.name;
     const agentUrl = getAgentUrl();
     const dashboardUrl = getDashboardUrl();
+
+    // Loopback guard: refuse to mint a token/code that embeds an unreachable
+    // localhost URL (see GET / above).
+    if (isLoopbackHost(agentUrl)) {
+      res.status(409).json({ error: loopbackErrorMessage(agentUrl) });
+      return;
+    }
 
     // Create token (5 minute expiry)
     const token = createToken(

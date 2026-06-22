@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import request from 'supertest';
+import express from 'express';
+import { networkInterfaces } from 'os';
 import {
   verifyToken,
   createToken,
@@ -6,10 +9,18 @@ import {
   pairingCodes,
   registerCodeWithDashboard,
   getDashboardUrl,
+  getAgentUrl,
+  getLocalNetworkIp,
+  loopbackErrorMessage,
   normalizeAgentUrlForPairing,
   isLoopbackHost,
+  createPairRoutes,
 } from '../../src/routes/pair.js';
 import { config } from '../../src/config.js';
+
+// Mock os.networkInterfaces so LAN-IP detection is deterministic.
+vi.mock('os', () => ({ networkInterfaces: vi.fn(() => ({})) }));
+const mockNetworkInterfaces = vi.mocked(networkInterfaces);
 
 // Mock the config module
 vi.mock('../../src/config.js', () => ({
@@ -541,6 +552,149 @@ describe('Pairing Routes', () => {
 
     it('does not flag Tailscale hostname as loopback', () => {
       expect(isLoopbackHost('machine.tailnet.ts.net:4678')).toBe(false);
+    });
+  });
+
+  describe('getLocalNetworkIp', () => {
+    const ipv4 = (address: string, internal = false) => ({
+      address,
+      family: 'IPv4' as const,
+      internal,
+      netmask: '255.255.255.0',
+      mac: '00:00:00:00:00:00',
+      cidr: null,
+    });
+
+    it('returns the first private (RFC-1918) IPv4 address', () => {
+      mockNetworkInterfaces.mockReturnValue({
+        lo: [ipv4('127.0.0.1', true)],
+        eth0: [ipv4('192.168.1.50')],
+      } as ReturnType<typeof networkInterfaces>);
+      expect(getLocalNetworkIp()).toBe('192.168.1.50');
+    });
+
+    it('skips internal and link-local addresses', () => {
+      mockNetworkInterfaces.mockReturnValue({
+        lo: [ipv4('127.0.0.1', true)],
+        eth0: [ipv4('169.254.10.10')],
+        eth1: [ipv4('10.0.0.5')],
+      } as ReturnType<typeof networkInterfaces>);
+      expect(getLocalNetworkIp()).toBe('10.0.0.5');
+    });
+
+    it('prefers a private range over a public address', () => {
+      mockNetworkInterfaces.mockReturnValue({
+        eth0: [ipv4('8.8.8.8')],
+        eth1: [ipv4('172.16.0.9')],
+      } as ReturnType<typeof networkInterfaces>);
+      expect(getLocalNetworkIp()).toBe('172.16.0.9');
+    });
+
+    it('falls back to a public address when no private range exists', () => {
+      mockNetworkInterfaces.mockReturnValue({
+        lo: [ipv4('127.0.0.1', true)],
+        eth0: [ipv4('203.0.113.7')],
+      } as ReturnType<typeof networkInterfaces>);
+      expect(getLocalNetworkIp()).toBe('203.0.113.7');
+    });
+
+    it('returns null on a loopback-only host', () => {
+      mockNetworkInterfaces.mockReturnValue({
+        lo: [ipv4('127.0.0.1', true)],
+      } as ReturnType<typeof networkInterfaces>);
+      expect(getLocalNetworkIp()).toBeNull();
+    });
+  });
+
+  describe('getAgentUrl fallback resolution', () => {
+    // The shared config mock sets agent.url; toggle it per-test and restore.
+    const originalUrl = config.agent?.url;
+    afterEach(() => {
+      if (config.agent) config.agent.url = originalUrl;
+    });
+
+    it('prefers config.agent.url when set (never overridden by LAN detection)', () => {
+      if (config.agent) config.agent.url = 'machine.tailnet.ts.net:4678';
+      mockNetworkInterfaces.mockReturnValue({
+        eth0: [{ address: '192.168.1.50', family: 'IPv4', internal: false } as never],
+      } as ReturnType<typeof networkInterfaces>);
+      expect(getAgentUrl()).toBe('machine.tailnet.ts.net:4678');
+    });
+
+    it('uses detected LAN IP when config.agent.url is unset', () => {
+      if (config.agent) config.agent.url = undefined;
+      mockNetworkInterfaces.mockReturnValue({
+        lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true } as never],
+        eth0: [{ address: '192.168.1.50', family: 'IPv4', internal: false } as never],
+      } as ReturnType<typeof networkInterfaces>);
+      expect(getAgentUrl()).toBe('192.168.1.50:4678');
+    });
+
+    it('falls back to localhost when no LAN IP is detected', () => {
+      if (config.agent) config.agent.url = undefined;
+      mockNetworkInterfaces.mockReturnValue({
+        lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true } as never],
+      } as ReturnType<typeof networkInterfaces>);
+      expect(getAgentUrl()).toBe('localhost:4678');
+    });
+  });
+
+  describe('loopback guard on QR/token routes', () => {
+    const originalUrl = config.agent?.url;
+    let app: express.Express;
+
+    beforeEach(() => {
+      app = express();
+      app.use('/pair', createPairRoutes());
+      // Stub dashboard registration so the reachable-URL path never hits network.
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      }) as unknown as typeof fetch;
+    });
+
+    afterEach(() => {
+      if (config.agent) config.agent.url = originalUrl;
+      vi.restoreAllMocks();
+    });
+
+    it('GET /pair/info returns 409 and never mints a localhost token', async () => {
+      if (config.agent) config.agent.url = undefined;
+      mockNetworkInterfaces.mockReturnValue({
+        lo: [{ address: '127.0.0.1', family: 'IPv4', internal: true } as never],
+      } as ReturnType<typeof networkInterfaces>);
+
+      const res = await request(app).get('/pair/info');
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('loopback');
+      expect(res.body.token).toBeUndefined();
+      expect(res.body.code).toBeUndefined();
+    });
+
+    it('GET /pair renders an error page (no token/pairing link) for loopback', async () => {
+      if (config.agent) config.agent.url = 'localhost:4678';
+      const res = await request(app).get('/pair');
+      expect(res.status).toBe(409);
+      expect(res.text).toContain('Pairing unavailable');
+      expect(res.text).not.toContain('/connect?token=');
+    });
+
+    it('GET /pair/info succeeds with a reachable LAN agent URL', async () => {
+      if (config.agent) config.agent.url = '192.168.1.50:4678';
+      const res = await request(app).get('/pair/info');
+      expect(res.status).toBe(200);
+      expect(res.body.agentUrl).toBe('192.168.1.50:4678');
+      expect(res.body.token).toBeTruthy();
+      expect(res.body.code).toMatch(/^\d{6}$/);
+    });
+  });
+
+  describe('loopbackErrorMessage', () => {
+    it('includes the offending URL and the config remedy', () => {
+      const msg = loopbackErrorMessage('localhost:4678');
+      expect(msg).toContain('localhost:4678');
+      expect(msg).toContain('agent.url');
     });
   });
 });
