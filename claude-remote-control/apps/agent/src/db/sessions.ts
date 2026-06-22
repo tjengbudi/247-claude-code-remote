@@ -2,6 +2,38 @@ import { getDatabase } from './index.js';
 import type { DbSession, UpsertSessionInput } from './schema.js';
 
 /**
+ * Identity of the dashboard viewer requesting sessions, threaded from the web
+ * client (browser→agent) via WS/HTTP query params. Soft / view-isolation:
+ * the agent trusts the claimed `ownerId` (the shared agent token carries no
+ * per-user identity), filtering its session list by it.
+ */
+export interface ViewerContext {
+  /** Web user id of the viewer, or null when none was supplied (legacy client). */
+  ownerId: string | null;
+  /** True when the viewer is the dashboard owner (first/bootstrap account). */
+  isOwner: boolean;
+}
+
+/**
+ * Whether a session is visible to a given viewer.
+ * - You always see sessions you own (owner_id === your id).
+ * - Untagged sessions (owner_id NULL — legacy/CLI/hook-created) are visible
+ *   ONLY to the owner account.
+ *
+ * A null viewer ownerId (no identity supplied) only ever matches untagged rows
+ * when the viewer is the owner — it never collides with a real user's id.
+ */
+export function isSessionVisible(
+  session: Pick<DbSession, 'owner_id'>,
+  viewer: ViewerContext
+): boolean {
+  if (session.owner_id == null) {
+    return viewer.isOwner;
+  }
+  return session.owner_id === viewer.ownerId;
+}
+
+/**
  * Get a session by name
  */
 export function getSession(name: string): DbSession | null {
@@ -49,12 +81,14 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
     INSERT INTO sessions (
       name, project, last_event,
       last_activity, created_at, updated_at,
-      status, status_source, attention_reason, last_status_change
+      status, status_source, attention_reason, last_status_change,
+      owner_id
     )
     VALUES (
       @name, @project, @lastEvent,
       @lastActivity, @createdAt, @updatedAt,
-      @status, @statusSource, @attentionReason, @lastStatusChange
+      @status, @statusSource, @attentionReason, @lastStatusChange,
+      @ownerId
     )
     ON CONFLICT(name) DO UPDATE SET
       last_event = COALESCE(@lastEvent, last_event),
@@ -63,7 +97,9 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
       status = COALESCE(@status, status),
       status_source = COALESCE(@statusSource, status_source),
       attention_reason = CASE WHEN @status IS NOT NULL THEN @attentionReason ELSE attention_reason END,
-      last_status_change = COALESCE(@lastStatusChange, last_status_change)
+      last_status_change = COALESCE(@lastStatusChange, last_status_change),
+      -- First writer wins: a later viewer must never steal ownership.
+      owner_id = COALESCE(owner_id, @ownerId)
   `);
 
   stmt.run({
@@ -77,6 +113,7 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
     statusSource: input.statusSource ?? null,
     attentionReason: input.attentionReason ?? null,
     lastStatusChange,
+    ownerId: input.ownerId ?? null,
   });
 
   return getSession(name)!;

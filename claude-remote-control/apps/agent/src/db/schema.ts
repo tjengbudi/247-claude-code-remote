@@ -21,6 +21,9 @@ export interface DbSession {
   status_source: DbStatusSource | null;
   attention_reason: DbAttentionReason | null;
   last_status_change: number | null;
+  // Per-user view isolation (v18). NULL = untagged (legacy/CLI/hook-created);
+  // such rows are visible only to the dashboard owner account.
+  owner_id: string | null;
 }
 
 export interface DbSchemaVersion {
@@ -40,13 +43,16 @@ export interface UpsertSessionInput {
   status?: DbSessionStatus | null;
   statusSource?: DbStatusSource | null;
   attentionReason?: DbAttentionReason | null;
+  // Per-user view isolation (v18). Set on first creation; never overwritten
+  // (upsert uses COALESCE so the original creator keeps ownership).
+  ownerId?: string | null;
 }
 
 // ============================================================================
-// SQL Schema Definitions (v17 - Status Tracking via Hooks)
+// SQL Schema Definitions (v18 - Per-user view isolation)
 // ============================================================================
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export const CREATE_TABLES_SQL = `
 -- Sessions: current state of terminal sessions with status tracking
@@ -63,13 +69,16 @@ CREATE TABLE IF NOT EXISTS sessions (
   status TEXT,
   status_source TEXT,
   attention_reason TEXT,
-  last_status_change INTEGER
+  last_status_change INTEGER,
+  -- Per-user view isolation (v18); NULL = untagged (owner-only visibility)
+  owner_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
 CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner_id);
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (

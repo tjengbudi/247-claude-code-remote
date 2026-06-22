@@ -128,6 +128,8 @@ export function createHooksRoutes(): Router {
           attentionReason: notification.attentionReason,
           lastEvent: notification.eventType,
           lastActivity: now,
+          // Hooks carry no web-user identity → untagged (owner-only visibility).
+          ownerId: null,
         });
         console.log(`[Hooks] Created new session from hook: ${sessionName}`);
       } else {

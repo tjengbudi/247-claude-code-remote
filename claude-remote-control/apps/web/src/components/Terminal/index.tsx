@@ -24,6 +24,8 @@ interface TerminalProps {
   onMenuClick: () => void;
   /** Mobile mode for responsive styling and smaller font */
   isMobile?: boolean;
+  /** Web user id of the current viewer — tags newly-created sessions for per-user isolation. */
+  owner?: string;
   // StatusLine metrics
   model?: string;
   costUsd?: number;
@@ -40,6 +42,7 @@ export function Terminal({
   onSessionCreated,
   onMenuClick,
   isMobile = false,
+  owner,
   model,
   costUsd,
 }: TerminalProps) {
@@ -81,6 +84,7 @@ export function Terminal({
     onSessionCreated,
     onCopySuccess: handleCopySuccess,
     isMobile,
+    owner,
   });
 
   // Handle paste from clipboard (for mobile header button)

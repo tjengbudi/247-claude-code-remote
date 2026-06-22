@@ -102,6 +102,56 @@ describe('GET /api/auth/session', () => {
     expect(body.data.user.name).toBe('frank');
     expect(body.data.user.email).toBe('frank@example.com');
     expect(body.ownerExists).toBe(true);
+    // The sole (first) user is the dashboard owner.
+    expect(body.isOwner).toBe(true);
+  });
+
+  it('returns isOwner:true for the first user and false for a later one', async () => {
+    const { hashPassword, createSession } = await import('@/lib/auth');
+    const { db } = await import('@/lib/db');
+    const { user } = await import('@/lib/db/schema');
+
+    // First (owner) account.
+    const ownerId = 'user-owner';
+    await db.insert(user).values({
+      id: ownerId,
+      username: 'dev',
+      passwordHash: await hashPassword('password123'),
+      createdAt: new Date(1000),
+    });
+
+    // Second (non-owner) account, created later.
+    const aliceId = 'user-alice';
+    await db.insert(user).values({
+      id: aliceId,
+      username: 'alice',
+      passwordHash: await hashPassword('password456'),
+      createdAt: new Date(2000),
+    });
+
+    const { GET } = await import('@/app/api/auth/session/route');
+
+    // Owner session → isOwner true
+    await createSession(ownerId);
+    let res = await GET();
+    let body = await res.json();
+    expect(body.data.user.id).toBe(ownerId);
+    expect(body.isOwner).toBe(true);
+
+    // Alice session → isOwner false
+    await createSession(aliceId);
+    res = await GET();
+    body = await res.json();
+    expect(body.data.user.id).toBe(aliceId);
+    expect(body.isOwner).toBe(false);
+  });
+
+  it('reports isOwner:false when logged out', async () => {
+    const { GET } = await import('@/app/api/auth/session/route');
+    const res = await GET();
+    const body = await res.json();
+    expect(body.data.user).toBeNull();
+    expect(body.isOwner).toBeUndefined();
   });
 
   it('ownerExists reflects the user table state', async () => {

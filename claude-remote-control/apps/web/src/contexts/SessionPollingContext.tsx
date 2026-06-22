@@ -14,7 +14,22 @@ import { buildWebSocketUrl, buildApiUrl } from '@/lib/utils';
 import { openAgentWebSocket } from '@/lib/ws-token';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { wsLogger, pollingLogger, archivedLogger } from '@/lib/logger';
+import { useAuth } from '@/lib/auth/client';
 import type { WSSessionsMessageFromAgent } from '247-shared';
+
+/**
+ * Build the per-user view-isolation query string (`owner`/`isOwner`) the agent
+ * uses to filter sessions to the current dashboard user. Empty when identity is
+ * unknown (logged out / pre-resolve) — the agent then shows nothing private.
+ *
+ * Exported for unit testing the wire contract.
+ */
+export function viewerParams(viewer: { ownerId: string | null; isOwner: boolean }): string {
+  const params = new URLSearchParams();
+  if (viewer.ownerId) params.set('owner', viewer.ownerId);
+  if (viewer.isOwner) params.set('isOwner', '1');
+  return params.toString();
+}
 
 export interface Machine {
   id: string;
@@ -106,6 +121,30 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
   const wsHasOpenedRef = useRef<Set<string>>(new Set()); // Track machines where WS successfully opened
   const onNeedsAttentionRef = useRef<((sessionName: string) => void) | undefined>(undefined);
 
+  // Current dashboard user identity for per-user session view isolation,
+  // threaded to the agent on every /sessions WS + /api/sessions request.
+  // Read once from the auth session; kept in a ref so the stable fetch/connect
+  // callbacks always see the latest value without re-subscribing.
+  const { getSession: getAuthSession } = useAuth();
+  const viewerRef = useRef<{ ownerId: string | null; isOwner: boolean }>({
+    ownerId: null,
+    isOwner: false,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    getAuthSession().then((session) => {
+      if (cancelled) return;
+      viewerRef.current = {
+        ownerId: session.data.user?.id ?? null,
+        isOwner: session.isOwner,
+      };
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [getAuthSession]);
+
   const setOnNeedsAttention = useCallback(
     (callback: ((sessionName: string) => void) | undefined) => {
       onNeedsAttentionRef.current = callback;
@@ -143,9 +182,13 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
       const isWsConnected = wsConnectedRef.current.has(machine.id);
 
       try {
-        const response = await fetch(buildApiUrl(agentUrl, '/api/sessions'), {
-          signal: controller.signal,
-        });
+        const qs = viewerParams(viewerRef.current);
+        const response = await fetch(
+          buildApiUrl(agentUrl, `/api/sessions${qs ? `?${qs}` : ''}`),
+          {
+            signal: controller.signal,
+          }
+        );
 
         if (!response.ok) throw new Error('Failed to fetch sessions');
 
@@ -254,7 +297,10 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
     const agentUrl = machine.config?.agentUrl || 'localhost:4678';
 
     try {
-      const response = await fetch(buildApiUrl(agentUrl, '/api/sessions/archived'));
+      const qs = viewerParams(viewerRef.current);
+      const response = await fetch(
+        buildApiUrl(agentUrl, `/api/sessions/archived${qs ? `?${qs}` : ''}`)
+      );
       if (!response.ok) return;
 
       const sessions: SessionInfo[] = await response.json();
@@ -280,7 +326,13 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
       const agentUrl = machine.config?.agentUrl || 'localhost:4678';
       // Include app version in WebSocket URL for auto-update detection
       const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || '0.0.0';
-      const wsUrl = buildWebSocketUrl(agentUrl, `/sessions?v=${encodeURIComponent(appVersion)}`);
+      // Append per-user view-isolation identity so the agent filters the
+      // session list (and live broadcasts) to the current dashboard user.
+      const vqs = viewerParams(viewerRef.current);
+      const wsUrl = buildWebSocketUrl(
+        agentUrl,
+        `/sessions?v=${encodeURIComponent(appVersion)}${vqs ? `&${vqs}` : ''}`
+      );
 
       // Close existing connection if any
       const existingWs = wsConnectionsRef.current.get(machine.id);

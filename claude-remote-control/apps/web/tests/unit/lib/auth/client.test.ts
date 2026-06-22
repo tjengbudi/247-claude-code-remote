@@ -36,6 +36,47 @@ describe('useAuth hook', () => {
       expect(session.ownerExists).toBe(true);
     });
 
+    it('surfaces isOwner:true when the response says so', async () => {
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: { user: { id: 'u1', name: 'dev', email: null } },
+          ownerExists: true,
+          isOwner: true,
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useAuth());
+      const session = await act(async () => result.current.getSession());
+
+      expect(session.isOwner).toBe(true);
+    });
+
+    it('defaults isOwner to false when absent or not exactly true', async () => {
+      // Missing isOwner → false (never grants owner visibility on ambiguity).
+      vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: { user: { id: 'u2', name: 'alice', email: null } },
+          ownerExists: true,
+        }),
+      } as Response);
+
+      const { result } = renderHook(() => useAuth());
+      const session = await act(async () => result.current.getSession());
+
+      expect(session.isOwner).toBe(false);
+    });
+
+    it('reports isOwner:false on fetch error (UNKNOWN)', async () => {
+      vi.spyOn(global, 'fetch').mockRejectedValueOnce(new Error('network'));
+
+      const { result } = renderHook(() => useAuth());
+      const session = await act(async () => result.current.getSession());
+
+      expect(session.isOwner).toBe(false);
+    });
+
     it('returns null user when logged out', async () => {
       const mockResponse = {
         data: { user: null },

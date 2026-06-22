@@ -17,6 +17,10 @@ interface SessionResult {
   // never as "no owner" — so a transient blip can't trigger a second-owner
   // bootstrap. [Source: code-review BS1]
   ownerExists: boolean | null;
+  // True when the logged-in user is the dashboard owner (first/bootstrap
+  // account). Drives per-user agent-session view isolation. Defaults to false
+  // when absent/unknown so non-owners never gain owner visibility on a blip.
+  isOwner: boolean;
 }
 
 function isSessionUser(v: unknown): v is SessionUser {
@@ -29,7 +33,7 @@ function isSessionUser(v: unknown): v is SessionUser {
   );
 }
 
-const UNKNOWN: SessionResult = { data: { user: null }, ownerExists: null };
+const UNKNOWN: SessionResult = { data: { user: null }, ownerExists: null, isOwner: false };
 
 /**
  * Auth hook for consuming the local auth API routes.
@@ -57,7 +61,8 @@ export function useAuth() {
       const user = isSessionUser(rawUser) ? rawUser : null;
       const ownerExists =
         typeof body.ownerExists === 'boolean' ? body.ownerExists : null;
-      return { data: { user }, ownerExists };
+      const isOwner = body.isOwner === true;
+      return { data: { user }, ownerExists, isOwner };
     } catch {
       return UNKNOWN;
     }

@@ -8,13 +8,51 @@ import { execSync } from 'child_process';
 import { createTerminal } from './terminal.js';
 import { config } from './config.js';
 import * as sessionsDb from './db/sessions.js';
+import type { ViewerContext } from './db/sessions.js';
 import type { WSMessageToAgent, WSSessionInfo, WSSessionsMessageFromAgent } from '247-shared';
 import { getAgentVersion, needsUpdate } from './version.js';
 import { triggerUpdate, isUpdateInProgress } from './updater.js';
 
 // Connection tracking
 const activeConnections = new Map<string, Set<WebSocket>>();
-const sessionsSubscribers = new Set<WebSocket>();
+// Sessions subscribers, each tagged with the viewer identity parsed from the
+// /sessions URL so broadcasts can be filtered per web user (view isolation).
+const sessionsSubscribers = new Map<WebSocket, ViewerContext>();
+
+/**
+ * Parse the viewer identity (owner / isOwner) a web client appends to agent
+ * URLs. Absent params → null owner + non-owner (a legacy client sees nothing
+ * but untagged-as-owner, i.e. nothing unless it also claims owner).
+ */
+function parseViewerContext(url?: URL): ViewerContext {
+  const ownerId = url?.searchParams.get('owner') || null;
+  const isOwner = url?.searchParams.get('isOwner') === '1';
+  return { ownerId, isOwner };
+}
+
+/**
+ * Send a sessions-channel message only to subscribers allowed to see a session
+ * with the given owner_id, based on each viewer's identity.
+ *
+ * `ownerId` may be passed explicitly (e.g. captured before a row is deleted);
+ * otherwise it is looked up from the DB by session name.
+ */
+function broadcastToViewersOf(
+  sessionName: string,
+  payload: string,
+  ownerId?: string | null
+): void {
+  const resolvedOwner =
+    ownerId !== undefined ? ownerId : (sessionsDb.getSession(sessionName)?.owner_id ?? null);
+  const ownerScope = { owner_id: resolvedOwner };
+
+  for (const [ws, viewer] of sessionsSubscribers) {
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    if (sessionsDb.isSessionVisible(ownerScope, viewer)) {
+      ws.send(payload);
+    }
+  }
+}
 
 // Generate unique session name
 let sessionCounter = 0;
@@ -39,18 +77,14 @@ function tmuxSessionExists(sessionName: string): boolean {
 /**
  * Broadcast session removed event to all subscribers
  */
-export function broadcastSessionRemoved(sessionName: string): void {
+export function broadcastSessionRemoved(sessionName: string, ownerId?: string | null): void {
   const message: WSSessionsMessageFromAgent = {
     type: 'session-removed',
     sessionName,
   };
-  const payload = JSON.stringify(message);
-
-  for (const ws of sessionsSubscribers) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(payload);
-    }
-  }
+  // ownerId is captured before the DB row is deleted; without it the lookup
+  // would miss (row gone) and only the owner account would see the removal.
+  broadcastToViewersOf(sessionName, JSON.stringify(message), ownerId);
 }
 
 /**
@@ -62,13 +96,8 @@ export function broadcastSessionArchived(sessionName: string, session: WSSession
     sessionName,
     session,
   };
-  const payload = JSON.stringify(message);
-
-  for (const ws of sessionsSubscribers) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(payload);
-    }
-  }
+  // Archived rows are kept in the DB, so owner_id is resolvable by name.
+  broadcastToViewersOf(sessionName, JSON.stringify(message));
 }
 
 /**
@@ -80,17 +109,11 @@ export function broadcastStatusUpdate(session: WSSessionInfo): void {
     type: 'status-update',
     session,
   };
-  const payload = JSON.stringify(message);
-
   console.log(
     `[Sessions WS] Broadcasting status update: session=${session.name} status=${session.status} reason=${session.attentionReason}`
   );
 
-  for (const ws of sessionsSubscribers) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(payload);
-    }
-  }
+  broadcastToViewersOf(session.name, JSON.stringify(message));
 }
 
 /**
@@ -100,6 +123,9 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
   const project = url.searchParams.get('project');
   const urlSessionName = url.searchParams.get('session');
   const createFlag = url.searchParams.get('create') === 'true';
+  // Web user id of whoever opened the terminal — tags new sessions for
+  // per-user view isolation. Null for legacy clients / direct connections.
+  const ownerId = url.searchParams.get('owner') || null;
   const sessionName = urlSessionName || generateSessionName(project || 'root');
 
   // Validate project (empty string is allowed for "terminal at root")
@@ -196,13 +222,14 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
           console.error(`Failed to capture history for '${sessionName}':`, err);
         });
     } else {
-      // New session - register in DB
+      // New session - register in DB, tagged with the creating web user.
       const now = Date.now();
       try {
         sessionsDb.upsertSession(sessionName, {
           project: project!,
           lastEvent: 'SessionCreated',
           lastActivity: now,
+          ownerId,
         });
       } catch (err) {
         console.error(`Failed to persist session '${sessionName}':`, err);
@@ -276,7 +303,8 @@ export function broadcastUpdatePending(targetVersion: string, message: string): 
   };
   const payload = JSON.stringify(msg);
 
-  for (const ws of sessionsSubscribers) {
+  // Update-pending is agent-wide (not session data) → every subscriber.
+  for (const ws of sessionsSubscribers.keys()) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(payload);
     }
@@ -326,8 +354,11 @@ function handleTerminalMessage(
  * Handle sessions WebSocket connections (real-time session list updates)
  */
 export function handleSessionsConnection(ws: WebSocket, url?: URL): void {
-  console.log('[Sessions WS] New subscriber connected');
-  sessionsSubscribers.add(ws);
+  const viewer = parseViewerContext(url);
+  console.log(
+    `[Sessions WS] New subscriber connected (owner=${viewer.ownerId ?? 'none'} isOwner=${viewer.isOwner})`
+  );
+  sessionsSubscribers.set(ws, viewer);
 
   // Extract web version from query params and check for updates
   const webVersion = url?.searchParams.get('v');
@@ -378,6 +409,12 @@ export function handleSessionsConnection(ws: WebSocket, url?: URL): void {
 
         // Get DB data if available
         const dbSession = sessionsDb.getSession(name);
+
+        // View isolation: skip sessions this viewer may not see. A tmux session
+        // with no DB row is untagged (owner_id null) → owner-only.
+        if (!sessionsDb.isSessionVisible({ owner_id: dbSession?.owner_id ?? null }, viewer)) {
+          continue;
+        }
 
         sessions.push({
           name,

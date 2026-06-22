@@ -21,8 +21,8 @@ describe('Database Schema', () => {
       expect(Number.isInteger(SCHEMA_VERSION)).toBe(true);
     });
 
-    it('current version is 17', () => {
-      expect(SCHEMA_VERSION).toBe(17);
+    it('current version is 18', () => {
+      expect(SCHEMA_VERSION).toBe(18);
     });
   });
 
@@ -123,6 +123,8 @@ describe('Database Schema', () => {
       expect(columnNames).toContain('status_source');
       expect(columnNames).toContain('attention_reason');
       expect(columnNames).toContain('last_status_change');
+      // Per-user view isolation (v18)
+      expect(columnNames).toContain('owner_id');
 
       db.close();
     });
@@ -145,11 +147,14 @@ describe('Database Schema', () => {
           status_source: 'hook',
           attention_reason: 'permission',
           last_status_change: Date.now(),
+          // Per-user view isolation (v18)
+          owner_id: 'user-1',
         };
 
         expect(session.id).toBe(1);
         expect(session.name).toBe('test--session-1');
         expect(session.status).toBe('needs_attention');
+        expect(session.owner_id).toBe('user-1');
       });
     });
 

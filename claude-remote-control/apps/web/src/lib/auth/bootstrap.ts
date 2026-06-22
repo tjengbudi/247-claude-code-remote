@@ -22,7 +22,7 @@
  */
 
 import { randomBytes, randomUUID } from 'crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, asc } from 'drizzle-orm';
 import { db } from '@/lib/db';
 import { user, userSettings } from '@/lib/db/schema';
 
@@ -157,6 +157,22 @@ export async function ownerExists(): Promise<boolean> {
     .limit(1);
 
   return rows.length > 0;
+}
+
+/**
+ * Return the id of the dashboard owner — the first/bootstrap account, i.e. the
+ * earliest-created user row. Used for per-user session view isolation: the
+ * owner sees untagged (legacy/CLI) agent sessions, other users see only their
+ * own. Returns null if no user exists yet.
+ */
+export async function getOwnerUserId(): Promise<string | null> {
+  const rows = await db
+    .select({ id: user.id })
+    .from(user)
+    .orderBy(asc(user.createdAt))
+    .limit(1);
+
+  return rows[0]?.id ?? null;
 }
 
 // Export for testing (reset memoization)

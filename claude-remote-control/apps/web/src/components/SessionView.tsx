@@ -26,6 +26,8 @@ interface SessionViewProps {
   onMenuClick: () => void;
   /** Mobile mode for responsive styling */
   isMobile?: boolean;
+  /** Web user id of the current viewer — tags newly-created sessions for per-user isolation. */
+  owner?: string;
 }
 
 /**
@@ -43,6 +45,7 @@ export function SessionView({
   onSessionCreated,
   onMenuClick,
   isMobile = false,
+  owner,
 }: SessionViewProps) {
   // Connection state tracked but not displayed (shown in MinimalSessionHeader via Terminal)
   const [_isConnected, setIsConnected] = useState(false);
@@ -79,6 +82,7 @@ export function SessionView({
       onSessionCreated={handleSessionCreated}
       onMenuClick={onMenuClick}
       isMobile={isMobile}
+      owner={owner}
       // StatusLine metrics
       model={sessionInfo?.model}
       costUsd={sessionInfo?.costUsd}

@@ -4,13 +4,26 @@
  */
 
 import { Router } from 'express';
+import type { Request } from 'express';
 import type { WSSessionInfo } from '247-shared';
 import * as sessionsDb from '../db/sessions.js';
+import type { ViewerContext } from '../db/sessions.js';
 import {
   broadcastSessionRemoved,
   broadcastSessionArchived,
   broadcastStatusUpdate,
 } from '../websocket-handlers.js';
+
+/**
+ * Parse the viewer identity (owner / isOwner) the web client appends to agent
+ * HTTP requests as query params, for per-user view isolation.
+ */
+function parseViewer(req: Request): ViewerContext {
+  const ownerRaw = req.query.owner;
+  const ownerId = typeof ownerRaw === 'string' && ownerRaw ? ownerRaw : null;
+  const isOwner = req.query.isOwner === '1';
+  return { ownerId, isOwner };
+}
 
 export function createSessionRoutes(): Router {
   const router = Router();
@@ -117,7 +130,8 @@ export function createSessionRoutes(): Router {
   });
 
   // Enhanced sessions endpoint with detailed info
-  router.get('/', async (_req, res) => {
+  router.get('/', async (req, res) => {
+    const viewer = parseViewer(req);
     const { exec } = await import('child_process');
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
@@ -135,6 +149,12 @@ export function createSessionRoutes(): Router {
 
         // Get DB data if available
         const dbSession = sessionsDb.getSession(name);
+
+        // View isolation: skip sessions this viewer may not see (untagged
+        // tmux-only sessions are owner-only).
+        if (!sessionsDb.isSessionVisible({ owner_id: dbSession?.owner_id ?? null }, viewer)) {
+          continue;
+        }
 
         sessions.push({
           name,
@@ -156,8 +176,11 @@ export function createSessionRoutes(): Router {
   });
 
   // Get archived sessions
-  router.get('/archived', (_req, res) => {
-    const archivedSessions = sessionsDb.getArchivedSessions();
+  router.get('/archived', (req, res) => {
+    const viewer = parseViewer(req);
+    const archivedSessions = sessionsDb
+      .getArchivedSessions()
+      .filter((session) => sessionsDb.isSessionVisible(session, viewer));
 
     const sessions: WSSessionInfo[] = archivedSessions.map((session) => ({
       name: session.name,
@@ -276,12 +299,22 @@ export function createSessionRoutes(): Router {
       return res.status(400).json({ error: 'Invalid session name' });
     }
 
+    // View isolation: don't let a user kill a session they can't see.
+    const viewer = parseViewer(req);
+    const target = sessionsDb.getSession(sessionName);
+    if (target && !sessionsDb.isSessionVisible(target, viewer)) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    // Capture owner before deleting so the removal broadcast can reach the
+    // owning viewer (the DB row is gone after deleteSession).
+    const ownerId = target?.owner_id ?? null;
+
     try {
       await execAsync(`tmux kill-session -t "${sessionName}" 2>/dev/null`);
       console.log(`Killed tmux session: ${sessionName}`);
 
       sessionsDb.deleteSession(sessionName);
-      broadcastSessionRemoved(sessionName);
+      broadcastSessionRemoved(sessionName, ownerId);
 
       res.json({ success: true, message: `Session ${sessionName} killed` });
     } catch {
@@ -298,6 +331,13 @@ export function createSessionRoutes(): Router {
 
     if (!/^[\w-]+$/.test(sessionName)) {
       return res.status(400).json({ error: 'Invalid session name' });
+    }
+
+    // View isolation: don't let a user archive a session they can't see.
+    const viewer = parseViewer(req);
+    const existing = sessionsDb.getSession(sessionName);
+    if (existing && !sessionsDb.isSessionVisible(existing, viewer)) {
+      return res.status(404).json({ error: 'Session not found' });
     }
 
     const archivedSession = sessionsDb.archiveSession(sessionName);

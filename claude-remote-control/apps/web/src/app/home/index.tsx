@@ -22,6 +22,7 @@ import { useInAppNotifications } from '@/hooks/useInAppNotifications';
 import { useNotificationPreferences } from '@/hooks/useNotificationPreferences';
 import { useSoundNotifications } from '@/hooks/useSoundNotifications';
 import { useSessionActions } from '@/hooks/useSessionActions';
+import { useAuth } from '@/lib/auth/client';
 import { NotificationSettingsPanel } from '@/components/NotificationSettingsPanel';
 import { TokenCoveragePanel } from '@/components/TokenCoveragePanel';
 import { useSessionPolling, type SessionWithMachine } from '@/contexts/SessionPollingContext';
@@ -51,6 +52,20 @@ function mapSessionStatus(session: SessionWithMachine): SessionStatus {
 
 export function HomeContent() {
   const isMobile = useIsMobile();
+
+  // Current web user id — tags newly-created sessions so the agent can isolate
+  // each user's sessions (per-user view isolation).
+  const { getSession } = useAuth();
+  const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    getSession().then((session) => {
+      if (!cancelled) setCurrentUserId(session.data.user?.id ?? undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [getSession]);
 
   // Set CSS variable for viewport height (handles mobile keyboard)
   useViewportHeight();
@@ -432,6 +447,7 @@ export function HomeContent() {
               onMenuClick={handleMenuClick}
               onSessionCreated={handleSessionCreated}
               isMobile={false}
+              owner={currentUserId}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center">
@@ -530,6 +546,7 @@ export function HomeContent() {
             onMenuClick={handleMenuClick}
             onSessionCreated={handleSessionCreated}
             isMobile={true}
+            owner={currentUserId}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center">

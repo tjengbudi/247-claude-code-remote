@@ -32,6 +32,8 @@ interface UseTerminalConnectionProps {
   isMobile?: boolean;
   /** Agent-auth token (URL-safe base64) — forwarded via Sec-WebSocket-Protocol. May be undefined for pre-3.2 rows. */
   token?: string;
+  /** Web user id of the current viewer — tags newly-created sessions for per-user view isolation. */
+  owner?: string;
 }
 
 export function useTerminalConnection({
@@ -45,6 +47,7 @@ export function useTerminalConnection({
   onCopySuccess,
   isMobile = false,
   token,
+  owner,
 }: UseTerminalConnectionProps) {
   const [connected, setConnected] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -374,6 +377,8 @@ export function useTerminalConnection({
       if (environmentId) wsUrl += `&environment=${encodeURIComponent(environmentId)}`;
       if (isNewSession) wsUrl += '&create=true';
       if (planningProjectId) wsUrl += `&planningProjectId=${encodeURIComponent(planningProjectId)}`;
+      // Tag the session with its creator for per-user view isolation.
+      if (owner) wsUrl += `&owner=${encodeURIComponent(owner)}`;
 
       ws = openAgentWebSocket(wsUrl, token);
       wsRef.current = ws;

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { getCurrentUser, ownerExists } from '@/lib/auth';
+import { getCurrentUser, ownerExists, getOwnerUserId } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { user } from '@/lib/db/schema';
 
@@ -32,6 +32,11 @@ export async function GET() {
       });
     }
 
+    // isOwner: this user is the dashboard owner (first/bootstrap account).
+    // Used for per-user agent-session view isolation (owner sees untagged
+    // legacy/CLI sessions; other users see only their own).
+    const ownerId = await getOwnerUserId();
+
     return NextResponse.json({
       data: {
         user: {
@@ -41,6 +46,7 @@ export async function GET() {
         },
       },
       ownerExists: true,
+      isOwner: ownerId === row.id,
     });
   } catch {
     return NextResponse.json(

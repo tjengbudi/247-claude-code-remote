@@ -26,7 +26,7 @@ export { createSession, destroySession } from './session';
 
 // Re-export password/bootstrap/throttle for completeness (routes import from @/lib/auth)
 export { hashPassword, verifyPassword, needsRehash } from './password';
-export { getWebAuthSecret, ownerExists } from './bootstrap';
+export { getWebAuthSecret, ownerExists, getOwnerUserId } from './bootstrap';
 export { isLoginRateLimited, recordLoginFailure, resetLoginFailures, getClientIP } from './throttle';
 
 /**

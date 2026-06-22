@@ -94,6 +94,9 @@ function runMigrations(database: Database.Database): void {
       if (currentVersion < 17) {
         migrateToV17(database);
       }
+      if (currentVersion < 18) {
+        migrateToV18(database);
+      }
     }
 
     // Record the new version
@@ -262,6 +265,40 @@ function migrateToV17(database: Database.Database): void {
   database.exec('CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)');
 
   console.log('[DB] v17 migration: Complete');
+}
+
+/**
+ * Migration to v18: Per-user view isolation
+ * Adds a nullable owner_id column so the dashboard can filter sessions per
+ * web user. Existing rows keep owner_id NULL (untagged → owner-only visibility).
+ */
+function migrateToV18(database: Database.Database): void {
+  console.log('[DB] v18 migration: Adding per-user owner_id');
+
+  const getColumnNames = (): Set<string> => {
+    const columns = database.pragma('table_info(sessions)') as Array<{ name: string }>;
+    return new Set(columns.map((c) => c.name));
+  };
+
+  if (!getColumnNames().has('owner_id')) {
+    console.log('[DB] v18 migration: Adding column owner_id');
+    try {
+      database.exec('ALTER TABLE sessions ADD COLUMN owner_id TEXT');
+    } catch {
+      // Column might already exist from a failed partial migration
+      console.log('[DB] v18 migration: Column owner_id might already exist, continuing...');
+    }
+  }
+
+  // Verify the column was added
+  if (!getColumnNames().has('owner_id')) {
+    throw new Error('[DB] v18 migration failed: Missing column: owner_id');
+  }
+
+  // Create index if it doesn't exist
+  database.exec('CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner_id)');
+
+  console.log('[DB] v18 migration: Complete');
 }
 
 /**
