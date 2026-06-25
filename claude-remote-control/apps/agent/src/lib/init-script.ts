@@ -456,6 +456,7 @@ printf "  \${C_ORANGE}\${C_BOLD}247\${C_RESET} \${C_MUTED}│\${C_RESET} \${C_GR
 printf "  \${C_MUTED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\${C_RESET}\\n"
 printf "  \${C_MUTED}Session:\${C_RESET} \${C_CYAN}${escapedSession}\${C_RESET}\\n"
 printf "  \${C_MUTED}Tips:   \${C_RESET} \${C_DIM}Type\${C_RESET} \${C_ORANGE}claude\${C_RESET} \${C_DIM}to start Claude Code\${C_RESET}\\n"
+printf "  \${C_MUTED}Copy:   \${C_RESET} \${C_DIM}Right-click, then press\${C_RESET} \${C_ORANGE}p\${C_RESET}\${C_DIM}aste /\${C_RESET} \${C_ORANGE}c\${C_RESET}\${C_DIM}opy /\${C_RESET} \${C_ORANGE}l\${C_RESET}\${C_DIM}ine /\${C_RESET} \${C_ORANGE}w\${C_RESET}\${C_DIM}ord\${C_RESET}\\n"
 printf "  \${C_MUTED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\${C_RESET}\\n"
 printf "\\n"`;
 
@@ -496,7 +497,7 @@ tmux set-option -t "${escapedSession}" set-clipboard on 2>/dev/null
 # Line / Copy Word so the web terminal has a usable copy-paste loop. Copy lands
 # in the tmux buffer; Paste pastes it back. Binding is server-global (tmux key
 # tables are not per-session) — re-running init just re-sets the same binding.
-tmux bind-key -T root MouseDown3Pane display-menu -T "#[align=centre] 247 " -x M -y M "Paste" p "paste-buffer -p" "Copy Mode" c "copy-mode" "#{?mouse_line,Copy Line,}" l 'copy-mode -q ; set-buffer "#{q:mouse_line}"' "#{?mouse_word,Copy Word,}" w 'copy-mode -q ; set-buffer "#{q:mouse_word}"' "" "Horizontal Split" H "split-window -h" "Vertical Split" V "split-window -v" "" "Kill Pane" X "kill-pane" "#{?window_zoomed_flag,Unzoom,Zoom}" z "resize-pane -Z" 2>/dev/null
+tmux bind-key -T root MouseDown3Pane display-menu -T "#[align=centre]247 · press the letter" -x M -y M "Paste" p "paste-buffer -p" "Copy Mode" c "copy-mode" "#{?mouse_line,Copy Line,}" l 'copy-mode -q ; set-buffer "#{q:mouse_line}"' "#{?mouse_word,Copy Word,}" w 'copy-mode -q ; set-buffer "#{q:mouse_word}"' "" "Horizontal Split" H "split-window -h" "Vertical Split" V "split-window -v" "" "Kill Pane" X "kill-pane" "#{?window_zoomed_flag,Unzoom,Zoom}" z "resize-pane -Z" 2>/dev/null
 ${tmuxStatusConfig}
 
 # ═══════════════════════════════════════════════════════════════

@@ -56,8 +56,11 @@ describe('init-script', () => {
 
       // OSC52 passthrough where supported; copies still land in the tmux buffer.
       expect(script).toContain('tmux set-option -t "my-session" set-clipboard on');
-      // Custom MouseDown3Pane menu the default tmux menu lacks.
+      // Custom MouseDown3Pane menu the default tmux menu lacks. Title hints to
+      // press the letter, since menu hover does not work over the web terminal
+      // (bash pane = click-only mouse mode, no motion tracking).
       expect(script).toContain('tmux bind-key -T root MouseDown3Pane display-menu');
+      expect(script).toContain('press the letter');
       expect(script).toContain('"Paste" p "paste-buffer -p"');
       expect(script).toContain('"Copy Mode" c "copy-mode"');
       expect(script).toContain('Copy Line');
