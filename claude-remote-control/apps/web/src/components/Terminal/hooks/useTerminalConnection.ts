@@ -32,8 +32,6 @@ interface UseTerminalConnectionProps {
   planningProjectId?: string;
   onSessionCreated?: (name: string) => void;
   onCopySuccess: () => void;
-  /** Invoked on right-click when there is no selection — opens the paste flow. */
-  onRequestPaste?: () => void;
   /** Mobile mode - use smaller font and handle orientation changes */
   isMobile?: boolean;
   /** Agent-auth token (URL-safe base64) — forwarded via Sec-WebSocket-Protocol. May be undefined for pre-3.2 rows. */
@@ -51,7 +49,6 @@ export function useTerminalConnection({
   planningProjectId,
   onSessionCreated,
   onCopySuccess,
-  onRequestPaste,
   isMobile = false,
   token,
   owner,
@@ -162,8 +159,7 @@ export function useTerminalConnection({
     let handleResize: (() => void) | null = null;
     let handleMouseUp: (() => void) | null = null;
     let handlePaste: ((e: ClipboardEvent) => void) | null = null;
-    let handleContextMenuCapture: ((e: MouseEvent) => void) | null = null;
-    let handleRightMouseDownCapture: ((e: MouseEvent) => void) | null = null;
+    let handleContextMenu: ((e: MouseEvent) => void) | null = null;
     let termElementForMouse: HTMLElement | null = null;
     let handleTouchStart: ((e: TouchEvent) => void) | null = null;
     let handleTouchMove: ((e: TouchEvent) => void) | null = null;
@@ -266,23 +262,14 @@ export function useTerminalConnection({
       term.element?.addEventListener('mousedown', handleMouseDown);
       window.addEventListener('mouseup', handleMouseUp);
 
-      // Right-click handling (PuTTY-style) — see createRightClickHandlers.
-      // Listeners attach in the CAPTURE phase so the right-button mousedown is
-      // swallowed before xterm's bubble-phase forwarder can send an SGR report
-      // to tmux (which would otherwise pop a second, stacked context menu).
-      const currentTermForRightClick = term;
-      const rightClick = createRightClickHandlers({
-        getSelection: () => currentTermForRightClick.getSelection(),
-        writeClipboard,
-        onCopySuccess,
-        clearSelection: () => currentTermForRightClick.clearSelection(),
-        onRequestPaste: () => onRequestPaste?.(),
-      });
-      handleContextMenuCapture = rightClick.onContextMenu;
-      handleRightMouseDownCapture = rightClick.onMouseDownCapture;
+      // Right-click handling — see createRightClickHandlers. We leave the
+      // right-button mousedown to propagate so xterm forwards it to the PTY and
+      // tmux shows its own (terminal-native) menu; we only suppress the
+      // browser's native menu so the two no longer stack.
+      const rightClick = createRightClickHandlers();
+      handleContextMenu = rightClick.onContextMenu;
       termElementForMouse = term.element ?? null;
-      termElementForMouse?.addEventListener('mousedown', handleRightMouseDownCapture, true);
-      termElementForMouse?.addEventListener('contextmenu', handleContextMenuCapture, true);
+      termElementForMouse?.addEventListener('contextmenu', handleContextMenu);
 
       // Paste handler
       handlePaste = (e: ClipboardEvent) => {
@@ -800,11 +787,8 @@ export function useTerminalConnection({
       }
       if (handleMouseUp) window.removeEventListener('mouseup', handleMouseUp);
       if (handlePaste && termElement) termElement.removeEventListener('paste', handlePaste);
-      if (termElementForMouse && handleRightMouseDownCapture) {
-        termElementForMouse.removeEventListener('mousedown', handleRightMouseDownCapture, true);
-      }
-      if (termElementForMouse && handleContextMenuCapture) {
-        termElementForMouse.removeEventListener('contextmenu', handleContextMenuCapture, true);
+      if (termElementForMouse && handleContextMenu) {
+        termElementForMouse.removeEventListener('contextmenu', handleContextMenu);
       }
       // Clean up IME composition listeners
       if (imeTextarea && handleCompositionStart) {

@@ -1,16 +1,16 @@
 /**
  * Right-click handler tests.
  *
- * PuTTY-style behaviour: right-click copies the selection if there is one,
- * otherwise opens the paste flow. Both handlers suppress the default/forwarded
- * behaviour so neither the browser nor tmux pops a context menu.
+ * We want the tmux (terminal-native) menu to appear on right-click, not the
+ * browser's. So the handler suppresses ONLY the browser's native menu via
+ * preventDefault and leaves the right-button mousedown to propagate to xterm
+ * (which forwards it to the PTY → tmux shows its own menu).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createRightClickHandlers, type RightClickDeps } from '@/components/Terminal/lib/rightClick';
+import { describe, it, expect, vi } from 'vitest';
+import { createRightClickHandlers } from '@/components/Terminal/lib/rightClick';
 
-function makeMouseEvent(button: number) {
+function makeMouseEvent() {
   return {
-    button,
     preventDefault: vi.fn(),
     stopPropagation: vi.fn(),
   } as unknown as MouseEvent & {
@@ -20,85 +20,17 @@ function makeMouseEvent(button: number) {
 }
 
 describe('createRightClickHandlers', () => {
-  let deps: {
-    getSelection: ReturnType<typeof vi.fn>;
-    writeClipboard: ReturnType<typeof vi.fn>;
-    onCopySuccess: ReturnType<typeof vi.fn>;
-    clearSelection: ReturnType<typeof vi.fn>;
-    onRequestPaste: ReturnType<typeof vi.fn>;
-  };
-
-  beforeEach(() => {
-    deps = {
-      getSelection: vi.fn().mockReturnValue(''),
-      writeClipboard: vi.fn().mockResolvedValue(true),
-      onCopySuccess: vi.fn(),
-      clearSelection: vi.fn(),
-      onRequestPaste: vi.fn(),
-    };
+  it('suppresses the browser menu via preventDefault', () => {
+    const { onContextMenu } = createRightClickHandlers();
+    const e = makeMouseEvent();
+    onContextMenu(e);
+    expect(e.preventDefault).toHaveBeenCalled();
   });
 
-  describe('onContextMenu', () => {
-    it('always suppresses the browser + tmux menus', () => {
-      const { onContextMenu } = createRightClickHandlers(deps as unknown as RightClickDeps);
-      const e = makeMouseEvent(2);
-      onContextMenu(e);
-      expect(e.preventDefault).toHaveBeenCalled();
-      expect(e.stopPropagation).toHaveBeenCalled();
-    });
-
-    it('copies and clears the selection when one exists', async () => {
-      deps.getSelection.mockReturnValue('hello world');
-      const { onContextMenu } = createRightClickHandlers(deps as unknown as RightClickDeps);
-
-      onContextMenu(makeMouseEvent(2));
-      await vi.waitFor(() => expect(deps.onCopySuccess).toHaveBeenCalled());
-
-      expect(deps.writeClipboard).toHaveBeenCalledWith('hello world');
-      expect(deps.clearSelection).toHaveBeenCalled();
-      expect(deps.onRequestPaste).not.toHaveBeenCalled();
-    });
-
-    it('does not flash copied when the clipboard write fails', async () => {
-      deps.getSelection.mockReturnValue('hello');
-      deps.writeClipboard.mockResolvedValue(false);
-      const { onContextMenu } = createRightClickHandlers(deps as unknown as RightClickDeps);
-
-      onContextMenu(makeMouseEvent(2));
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(deps.onCopySuccess).not.toHaveBeenCalled();
-    });
-
-    it('requests paste when there is no selection', () => {
-      deps.getSelection.mockReturnValue('');
-      const { onContextMenu } = createRightClickHandlers(deps as unknown as RightClickDeps);
-
-      onContextMenu(makeMouseEvent(2));
-
-      expect(deps.onRequestPaste).toHaveBeenCalled();
-      expect(deps.writeClipboard).not.toHaveBeenCalled();
-      expect(deps.clearSelection).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('onMouseDownCapture', () => {
-    it('swallows the right button so tmux gets no SGR report', () => {
-      const { onMouseDownCapture } = createRightClickHandlers(deps as unknown as RightClickDeps);
-      const e = makeMouseEvent(2);
-      onMouseDownCapture(e);
-      expect(e.stopPropagation).toHaveBeenCalled();
-    });
-
-    it('leaves left/middle clicks untouched', () => {
-      const { onMouseDownCapture } = createRightClickHandlers(deps as unknown as RightClickDeps);
-      const left = makeMouseEvent(0);
-      const middle = makeMouseEvent(1);
-      onMouseDownCapture(left);
-      onMouseDownCapture(middle);
-      expect(left.stopPropagation).not.toHaveBeenCalled();
-      expect(middle.stopPropagation).not.toHaveBeenCalled();
-    });
+  it('does NOT stop propagation, so xterm still forwards to tmux', () => {
+    const { onContextMenu } = createRightClickHandlers();
+    const e = makeMouseEvent();
+    onContextMenu(e);
+    expect(e.stopPropagation).not.toHaveBeenCalled();
   });
 });

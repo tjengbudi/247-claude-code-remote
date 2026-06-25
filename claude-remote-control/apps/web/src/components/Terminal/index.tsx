@@ -66,11 +66,6 @@ export function Terminal({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Right-click with no selection asks for a paste. The hook needs this callback
-  // at construction, but the paste flow uses sendInput (returned by the hook),
-  // so route through a ref that is assigned just below.
-  const requestPasteRef = useRef<() => void>(() => {});
-
   const {
     connected,
     connectionState,
@@ -94,12 +89,11 @@ export function Terminal({
     planningProjectId,
     onSessionCreated,
     onCopySuccess: handleCopySuccess,
-    onRequestPaste: () => requestPasteRef.current(),
     isMobile,
     owner,
   });
 
-  // Handle paste from clipboard (mobile header button + right-click).
+  // Handle paste from clipboard (mobile header button).
   // readClipboard works in a secure context (HTTPS / installed PWA); over plain
   // HTTP it returns null, so we fall back to the PasteBox native-paste field.
   const handlePaste = async () => {
@@ -110,7 +104,6 @@ export function Terminal({
     }
     setPasteBoxOpen(true);
   };
-  requestPasteRef.current = handlePaste;
 
   const {
     searchVisible,

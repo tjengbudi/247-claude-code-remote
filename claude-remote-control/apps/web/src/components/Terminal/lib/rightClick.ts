@@ -1,59 +1,28 @@
 /**
- * Right-click (context menu) handling for the terminal, PuTTY-style.
+ * Right-click (context menu) handling for the terminal.
  *
  * With `tmux mouse on`, xterm forwards the right-button mousedown to the PTY as
- * an SGR mouse report, so tmux pops its OWN context menu on top of the
- * browser's — two stacked menus. We suppress both and instead:
- *   - copy the current selection if there is one, else
- *   - open the paste flow.
+ * an SGR mouse report, so tmux pops its OWN context menu. The browser ALSO pops
+ * its native context menu on the same click — two stacked menus.
  *
- * The mousedown handler runs in the CAPTURE phase to swallow button 2 before
- * xterm's bubble-phase forwarder (on the inner screen element) can send the SGR
- * report to tmux. The contextmenu handler suppresses the browser menu and does
- * the actual work.
+ * We want the tmux menu only (the terminal-native one), so we leave the
+ * mousedown alone (xterm still forwards it → tmux menu appears) and merely
+ * suppress the browser's native menu via preventDefault on the contextmenu
+ * event.
  */
 
-export interface RightClickDeps {
-  /** Current terminal selection text ('' when nothing is selected). */
-  getSelection: () => string;
-  /** Writes text to the clipboard; resolves true on success. */
-  writeClipboard: (text: string) => Promise<boolean>;
-  /** Called after a successful copy (e.g. to flash the copied indicator). */
-  onCopySuccess: () => void;
-  /** Clears the terminal selection after copying. */
-  clearSelection: () => void;
-  /** Opens the paste flow when there is nothing to copy. */
-  onRequestPaste: () => void;
-}
-
 export interface RightClickHandlers {
-  /** Attach to the terminal element for the `contextmenu` event (capture). */
+  /** Attach to the terminal element for the `contextmenu` event. */
   onContextMenu: (e: MouseEvent) => void;
-  /** Attach to the terminal element for the `mousedown` event (capture). */
-  onMouseDownCapture: (e: MouseEvent) => void;
 }
 
-export function createRightClickHandlers(deps: RightClickDeps): RightClickHandlers {
+export function createRightClickHandlers(): RightClickHandlers {
   const onContextMenu = (e: MouseEvent) => {
+    // Suppress ONLY the browser's native menu. The right-button mousedown is
+    // left to propagate so xterm forwards it to the PTY and tmux shows its own
+    // menu — the single menu we want.
     e.preventDefault();
-    e.stopPropagation();
-    const selection = deps.getSelection();
-    if (selection) {
-      void deps.writeClipboard(selection).then((ok) => {
-        if (ok) deps.onCopySuccess();
-      });
-      deps.clearSelection();
-    } else {
-      deps.onRequestPaste();
-    }
   };
 
-  const onMouseDownCapture = (e: MouseEvent) => {
-    // Stop the right-button mousedown from reaching xterm's forwarder, so no
-    // SGR report is sent to tmux and no tmux menu appears. The contextmenu
-    // handler does the actual work.
-    if (e.button === 2) e.stopPropagation();
-  };
-
-  return { onContextMenu, onMouseDownCapture };
+  return { onContextMenu };
 }
