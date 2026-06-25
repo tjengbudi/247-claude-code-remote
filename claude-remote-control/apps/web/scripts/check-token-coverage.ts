@@ -24,11 +24,16 @@ import { homedir } from 'os';
 import { resolve } from 'path';
 import Database from 'better-sqlite3';
 
-const DB_PATH = process.env.WEB_DB_PATH ?? resolve(homedir(), '.247', 'data', 'web.db');
+// Default DB location: WEB_DB_PATH env (Docker) or ~/.247/data/web.db (native/dev).
+// Resolved lazily as the `run()` default so tests can pass an explicit path in-process
+// (no subprocess spawn) without depending on module-load-time env.
+function defaultDbPath(): string {
+  return process.env.WEB_DB_PATH ?? resolve(homedir(), '.247', 'data', 'web.db');
+}
 
-function run(): number {
-  if (!existsSync(DB_PATH)) {
-    console.log(`[check-token-coverage] DB not found at ${DB_PATH}`);
+export function run(dbPath: string = defaultDbPath()): number {
+  if (!existsSync(dbPath)) {
+    console.log(`[check-token-coverage] DB not found at ${dbPath}`);
     console.log(`  A fresh self-host web.db has no connections yet — nothing to check.`);
     console.log(`  After pairing your first connection, re-run this script before flipping enforcement.`);
     console.log(`\nPASS — 0 connections. No tokenless connections to worry about.`);
@@ -37,9 +42,9 @@ function run(): number {
 
   let db: Database.Database;
   try {
-    db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
   } catch (e) {
-    console.error(`[check-token-coverage] cannot open ${DB_PATH}: ${(e as Error).message}`);
+    console.error(`[check-token-coverage] cannot open ${dbPath}: ${(e as Error).message}`);
     return 2;
   }
 
@@ -49,7 +54,7 @@ function run(): number {
       .prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_connection' LIMIT 1`)
       .get();
     if (!hasTable) {
-      console.log(`[check-token-coverage] agent_connection table does not exist in ${DB_PATH}`);
+      console.log(`[check-token-coverage] agent_connection table does not exist in ${dbPath}`);
       console.log(`  Run migrations first (pnpm --filter 247-web db:migrate) then re-pair connections.`);
       console.log(`\nPASS — no agent_connection table yet. Nothing to check.`);
       return 0;
@@ -66,7 +71,7 @@ function run(): number {
       .get() as { n: number };
     const tokenless = tokenlessRow.n;
 
-    console.log(`[check-token-coverage] ${DB_PATH}`);
+    console.log(`[check-token-coverage] ${dbPath}`);
     console.log(`  Total connections: ${total}`);
     console.log(`  Tokenless:         ${tokenless}`);
 
@@ -90,11 +95,15 @@ function run(): number {
   } catch (e) {
     // A failing query (e.g. schema mismatch) should exit with the documented
     // code 2, not an unstructured stack trace.
-    console.error(`[check-token-coverage] query failed on ${DB_PATH}: ${(e as Error).message}`);
+    console.error(`[check-token-coverage] query failed on ${dbPath}: ${(e as Error).message}`);
     return 2;
   } finally {
     db.close();
   }
 }
 
-process.exit(run());
+// Only exit the process when invoked directly as a CLI (tsx scripts/check-token-coverage.ts).
+// When imported by tests, run() is called in-process and must NOT terminate the test runner.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  process.exit(run());
+}
