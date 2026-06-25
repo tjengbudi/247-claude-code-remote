@@ -7,6 +7,9 @@ import { SearchBar } from './SearchBar';
 import { ScrollToBottomButton } from './ScrollToBottomButton';
 import { MobileKeybar } from './MobileKeybar';
 import { KeybarToggleButton } from './KeybarToggleButton';
+import { PasteBox } from './PasteBox';
+import { SelectModeButton } from './SelectModeButton';
+import { readClipboard } from '@/lib/clipboard';
 import { useTerminalConnection, useTerminalSearch } from './hooks';
 import { useKeybarVisibility } from '@/hooks/useKeybarVisibility';
 import { MinimalSessionHeader } from '@/components/MinimalSessionHeader';
@@ -48,6 +51,7 @@ export function Terminal({
 }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [pasteBoxOpen, setPasteBoxOpen] = useState(false);
   const { isVisible: keybarVisible, toggle: toggleKeybar } = useKeybarVisibility();
 
   // Generate session name ONCE on first render, persisted across re-mounts
@@ -62,6 +66,11 @@ export function Terminal({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Right-click with no selection asks for a paste. The hook needs this callback
+  // at construction, but the paste flow uses sendInput (returned by the hook),
+  // so route through a ref that is assigned just below.
+  const requestPasteRef = useRef<() => void>(() => {});
+
   const {
     connected,
     connectionState,
@@ -73,6 +82,8 @@ export function Terminal({
     startClaude,
     sendInput,
     triggerResize,
+    selectMode,
+    toggleSelectMode,
   } = useTerminalConnection({
     terminalRef,
     agentUrl,
@@ -83,21 +94,23 @@ export function Terminal({
     planningProjectId,
     onSessionCreated,
     onCopySuccess: handleCopySuccess,
+    onRequestPaste: () => requestPasteRef.current(),
     isMobile,
     owner,
   });
 
-  // Handle paste from clipboard (for mobile header button)
+  // Handle paste from clipboard (mobile header button + right-click).
+  // readClipboard works in a secure context (HTTPS / installed PWA); over plain
+  // HTTP it returns null, so we fall back to the PasteBox native-paste field.
   const handlePaste = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) {
-        sendInput(text);
-      }
-    } catch {
-      // Clipboard access denied - silently fail
+    const text = await readClipboard();
+    if (text) {
+      sendInput(text);
+      return;
     }
+    setPasteBoxOpen(true);
   };
+  requestPasteRef.current = handlePaste;
 
   const {
     searchVisible,
@@ -164,11 +177,33 @@ export function Terminal({
 
       <ScrollToBottomButton visible={!isAtBottom} onClick={scrollToBottom} />
 
-      {/* Mobile: Keybar toggle button and virtual keyboard */}
+      <PasteBox
+        open={pasteBoxOpen}
+        onText={(t) => sendInput(t)}
+        onClose={() => setPasteBoxOpen(false)}
+      />
+
+      {/* Mobile: selection toggle, keybar toggle, and virtual keyboard */}
       {isMobile && (
         <>
+          <SelectModeButton
+            active={selectMode}
+            onToggle={toggleSelectMode}
+            keybarVisible={keybarVisible}
+          />
           <KeybarToggleButton isVisible={keybarVisible} onToggle={toggleKeybar} />
           <MobileKeybar onKeyPress={sendInput} visible={keybarVisible} />
+          {/* While selecting, surface a Copy action that reuses the desktop copy
+              path (clipboard write with HTTP fallback). */}
+          {selectMode && (
+            <button
+              onClick={copySelection}
+              className="absolute left-1/2 z-30 -translate-x-1/2 rounded-full border border-orange-500/40 bg-orange-500/25 px-5 py-2 text-sm font-medium text-orange-200 backdrop-blur-sm active:scale-95"
+              style={{ bottom: keybarVisible ? 124 : 16 }}
+            >
+              {copied ? 'Copied' : 'Copy selection'}
+            </button>
+          )}
         </>
       )}
     </div>

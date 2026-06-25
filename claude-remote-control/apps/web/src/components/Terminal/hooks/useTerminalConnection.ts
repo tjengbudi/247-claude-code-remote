@@ -17,7 +17,10 @@ import {
 import { buildWebSocketUrl } from '@/lib/utils';
 import { openAgentWebSocket } from '@/lib/ws-token';
 import { terminalLogger } from '@/lib/logger';
+import { writeClipboard } from '@/lib/clipboard';
 import { createImeReconciler } from '../lib/imeComposition';
+import { createRightClickHandlers } from '../lib/rightClick';
+import { cellFromPoint, selectionRange } from '../lib/touchSelection';
 
 interface UseTerminalConnectionProps {
   terminalRef: React.RefObject<HTMLDivElement | null>;
@@ -29,6 +32,8 @@ interface UseTerminalConnectionProps {
   planningProjectId?: string;
   onSessionCreated?: (name: string) => void;
   onCopySuccess: () => void;
+  /** Invoked on right-click when there is no selection — opens the paste flow. */
+  onRequestPaste?: () => void;
   /** Mobile mode - use smaller font and handle orientation changes */
   isMobile?: boolean;
   /** Agent-auth token (URL-safe base64) — forwarded via Sec-WebSocket-Protocol. May be undefined for pre-3.2 rows. */
@@ -46,6 +51,7 @@ export function useTerminalConnection({
   planningProjectId,
   onSessionCreated,
   onCopySuccess,
+  onRequestPaste,
   isMobile = false,
   token,
   owner,
@@ -62,6 +68,13 @@ export function useTerminalConnection({
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const isSelectingRef = useRef(false);
   const isPastingRef = useRef(false);
+
+  // Mobile text-selection mode. When on, finger drags drive xterm selection
+  // (see lib/touchSelection) instead of scrolling. A ref mirrors the state so
+  // the long-lived touch handlers read the live value without re-subscribing.
+  const [selectMode, setSelectMode] = useState(false);
+  const selectModeRef = useRef(false);
+  selectModeRef.current = selectMode;
 
   // Reconnection tracking
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -86,14 +99,23 @@ export function useTerminalConnection({
   }, []);
 
   const copySelection = useCallback(() => {
-    if (xtermRef.current) {
-      const selection = xtermRef.current.getSelection();
-      if (selection) {
-        navigator.clipboard.writeText(selection);
-        onCopySuccess();
-      }
+    const selection = xtermRef.current?.getSelection();
+    if (selection) {
+      void writeClipboard(selection).then((ok) => {
+        if (ok) onCopySuccess();
+      });
     }
   }, [onCopySuccess]);
+
+  // Toggle mobile selection mode. Clearing any live selection on exit keeps the
+  // highlight from lingering after the user leaves the mode.
+  const toggleSelectMode = useCallback(() => {
+    setSelectMode((prev) => {
+      const next = !prev;
+      if (!next) xtermRef.current?.clearSelection();
+      return next;
+    });
+  }, []);
 
   const startClaude = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -140,6 +162,9 @@ export function useTerminalConnection({
     let handleResize: (() => void) | null = null;
     let handleMouseUp: (() => void) | null = null;
     let handlePaste: ((e: ClipboardEvent) => void) | null = null;
+    let handleContextMenuCapture: ((e: MouseEvent) => void) | null = null;
+    let handleRightMouseDownCapture: ((e: MouseEvent) => void) | null = null;
+    let termElementForMouse: HTMLElement | null = null;
     let handleTouchStart: ((e: TouchEvent) => void) | null = null;
     let handleTouchMove: ((e: TouchEvent) => void) | null = null;
     let handleTouchEnd: (() => void) | null = null;
@@ -194,8 +219,9 @@ export function useTerminalConnection({
         ) {
           const selection = currentTermForKeys.getSelection();
           if (selection) {
-            navigator.clipboard.writeText(selection);
-            onCopySuccess();
+            void writeClipboard(selection).then((ok) => {
+              if (ok) onCopySuccess();
+            });
           }
           return false;
         }
@@ -239,6 +265,24 @@ export function useTerminalConnection({
       };
       term.element?.addEventListener('mousedown', handleMouseDown);
       window.addEventListener('mouseup', handleMouseUp);
+
+      // Right-click handling (PuTTY-style) — see createRightClickHandlers.
+      // Listeners attach in the CAPTURE phase so the right-button mousedown is
+      // swallowed before xterm's bubble-phase forwarder can send an SGR report
+      // to tmux (which would otherwise pop a second, stacked context menu).
+      const currentTermForRightClick = term;
+      const rightClick = createRightClickHandlers({
+        getSelection: () => currentTermForRightClick.getSelection(),
+        writeClipboard,
+        onCopySuccess,
+        clearSelection: () => currentTermForRightClick.clearSelection(),
+        onRequestPaste: () => onRequestPaste?.(),
+      });
+      handleContextMenuCapture = rightClick.onContextMenu;
+      handleRightMouseDownCapture = rightClick.onMouseDownCapture;
+      termElementForMouse = term.element ?? null;
+      termElementForMouse?.addEventListener('mousedown', handleRightMouseDownCapture, true);
+      termElementForMouse?.addEventListener('contextmenu', handleContextMenuCapture, true);
 
       // Paste handler
       handlePaste = (e: ClipboardEvent) => {
@@ -309,15 +353,61 @@ export function useTerminalConnection({
           });
 
           let lastTouchY: number | null = null;
+          // Selection-mode drag anchor, in ABSOLUTE buffer coordinates.
+          let selectAnchor: { col: number; rowAbs: number } | null = null;
+
+          // Maps a touch to a cell using the screen element's live geometry.
+          const cellForTouch = (touch: Touch) => {
+            const rect = xtermScreen.getBoundingClientRect();
+            const cols = currentTermForTouch.cols;
+            const rows = currentTermForTouch.rows;
+            const cellWidth = rect.width / cols;
+            const cellHeight = rect.height / rows;
+            const { col, row } = cellFromPoint(
+              touch.clientX - rect.left,
+              touch.clientY - rect.top,
+              cellWidth,
+              cellHeight,
+              cols,
+              rows
+            );
+            const rowAbs = currentTermForTouch.buffer.active.viewportY + row;
+            return { col, rowAbs };
+          };
 
           handleTouchStart = (e: TouchEvent) => {
-            if (e.touches.length > 0) {
-              lastTouchY = e.touches[0].clientY;
+            if (e.touches.length === 0) return;
+            if (selectModeRef.current) {
+              // Begin a selection drag; anchor where the finger lands.
+              e.preventDefault();
+              selectAnchor = cellForTouch(e.touches[0]);
+              currentTermForTouch.clearSelection();
+              return;
             }
+            lastTouchY = e.touches[0].clientY;
           };
 
           handleTouchMove = (e: TouchEvent) => {
-            if (lastTouchY === null || e.touches.length === 0) return;
+            if (e.touches.length === 0) return;
+
+            // Selection mode: extend the xterm selection from the anchor to the
+            // current finger position instead of scrolling.
+            if (selectModeRef.current && selectAnchor) {
+              e.preventDefault();
+              e.stopPropagation();
+              const cur = cellForTouch(e.touches[0]);
+              const { col, row, length } = selectionRange(
+                selectAnchor.col,
+                selectAnchor.rowAbs,
+                cur.col,
+                cur.rowAbs,
+                currentTermForTouch.cols
+              );
+              if (length > 0) currentTermForTouch.select(col, row, length);
+              return;
+            }
+
+            if (lastTouchY === null) return;
 
             // Always prevent default to stop browser scroll
             e.preventDefault();
@@ -369,10 +459,12 @@ export function useTerminalConnection({
 
           handleTouchEnd = () => {
             lastTouchY = null;
+            selectAnchor = null;
           };
 
           handleTouchCancel = () => {
             lastTouchY = null;
+            selectAnchor = null;
           };
 
           xtermScreen.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -708,6 +800,12 @@ export function useTerminalConnection({
       }
       if (handleMouseUp) window.removeEventListener('mouseup', handleMouseUp);
       if (handlePaste && termElement) termElement.removeEventListener('paste', handlePaste);
+      if (termElementForMouse && handleRightMouseDownCapture) {
+        termElementForMouse.removeEventListener('mousedown', handleRightMouseDownCapture, true);
+      }
+      if (termElementForMouse && handleContextMenuCapture) {
+        termElementForMouse.removeEventListener('contextmenu', handleContextMenuCapture, true);
+      }
       // Clean up IME composition listeners
       if (imeTextarea && handleCompositionStart) {
         imeTextarea.removeEventListener('compositionstart', handleCompositionStart);
@@ -823,5 +921,7 @@ export function useTerminalConnection({
     sendInput,
     scrollTerminal,
     triggerResize,
+    selectMode,
+    toggleSelectMode,
   };
 }
