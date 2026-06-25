@@ -17,6 +17,7 @@ import {
 import { buildWebSocketUrl } from '@/lib/utils';
 import { openAgentWebSocket } from '@/lib/ws-token';
 import { terminalLogger } from '@/lib/logger';
+import { createImeReconciler } from '../lib/imeComposition';
 
 interface UseTerminalConnectionProps {
   terminalRef: React.RefObject<HTMLDivElement | null>;
@@ -143,6 +144,9 @@ export function useTerminalConnection({
     let handleTouchMove: ((e: TouchEvent) => void) | null = null;
     let handleTouchEnd: (() => void) | null = null;
     let handleTouchCancel: (() => void) | null = null;
+    let handleCompositionStart: (() => void) | null = null;
+    let handleCompositionEnd: (() => void) | null = null;
+    let imeTextarea: HTMLTextAreaElement | null = null;
     let termElement: HTMLElement | null = null;
     let touchElement: HTMLElement | null = null;
     let resizeObserver: ResizeObserver | null = null;
@@ -204,6 +208,25 @@ export function useTerminalConnection({
       xtermRef.current = term;
       fitAddonRef.current = fitAddon;
       searchAddonRef.current = searchAddon;
+
+      // IME composition reconciler — fixes hybrid IMEs (e.g. Gboard on Android)
+      // that stream characters live AND re-emit the whole word on compositionend,
+      // producing duplicates like "cek " -> "cekcek". Listeners attach AFTER
+      // xterm's own (registered during term.open) so endComposition() runs before
+      // xterm's setTimeout(0) flush reaches onData while the guard is still armed.
+      // Inert for physical-keyboard typing (no compositionstart fires).
+      const ime = createImeReconciler();
+      imeTextarea = term.textarea ?? null;
+      if (imeTextarea) {
+        handleCompositionStart = () => ime.startComposition();
+        handleCompositionEnd = () => {
+          ime.endComposition();
+          // Disarm after the flush tick so the guard never outlives it.
+          setTimeout(() => ime.disarmFlush(), 0);
+        };
+        imeTextarea.addEventListener('compositionstart', handleCompositionStart);
+        imeTextarea.addEventListener('compositionend', handleCompositionEnd);
+      }
 
       // Mouse selection tracking
       const handleMouseDown = () => {
@@ -550,11 +573,16 @@ export function useTerminalConnection({
 
       currentTerm.onData((data) => {
         if (isPastingRef.current) return;
+        // Reconcile IME composition: strip the redundant compositionend flush
+        // that hybrid IMEs (Gboard) emit after already streaming the word.
+        // Empty result = fully redundant, suppress the send.
+        const out = ime.process(data);
+        if (!out) return;
         // Use wsRef.current to get the active WebSocket (may have been reconnected)
         const activeWs = wsRef.current;
         if (activeWs?.readyState === WebSocket.OPEN) {
           lastActivityRef.current = Date.now(); // Track activity for adaptive heartbeat
-          activeWs.send(JSON.stringify({ type: 'input', data }));
+          activeWs.send(JSON.stringify({ type: 'input', data: out }));
 
           // Acknowledge session on first input (reset needs_attention)
           if (!hasAcknowledgedRef.current && sessionName && agentUrl) {
@@ -680,6 +708,13 @@ export function useTerminalConnection({
       }
       if (handleMouseUp) window.removeEventListener('mouseup', handleMouseUp);
       if (handlePaste && termElement) termElement.removeEventListener('paste', handlePaste);
+      // Clean up IME composition listeners
+      if (imeTextarea && handleCompositionStart) {
+        imeTextarea.removeEventListener('compositionstart', handleCompositionStart);
+      }
+      if (imeTextarea && handleCompositionEnd) {
+        imeTextarea.removeEventListener('compositionend', handleCompositionEnd);
+      }
       // Clean up touch scroll listeners
       if (touchElement && handleTouchStart) {
         touchElement.removeEventListener('touchstart', handleTouchStart);
