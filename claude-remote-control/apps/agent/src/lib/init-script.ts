@@ -488,6 +488,15 @@ ${customExports.length > 0 ? customExports.join('\n') : ''}
 tmux set-option -t "${escapedSession}" history-limit 50000 2>/dev/null
 tmux set-option -t "${escapedSession}" mouse on 2>/dev/null
 tmux set-option -t "${escapedSession}" focus-events on 2>/dev/null
+# Make tmux copy/paste reach the system clipboard via OSC52 where the client
+# supports it; copies always land in the tmux buffer regardless.
+tmux set-option -t "${escapedSession}" set-clipboard on 2>/dev/null
+# Custom right-click (MouseDown3Pane) menu: the default tmux menu has no Paste
+# and only a conditional Copy. We surface explicit Paste / Copy Mode / Copy
+# Line / Copy Word so the web terminal has a usable copy-paste loop. Copy lands
+# in the tmux buffer; Paste pastes it back. Binding is server-global (tmux key
+# tables are not per-session) — re-running init just re-sets the same binding.
+tmux bind-key -T root MouseDown3Pane display-menu -T "#[align=centre] 247 " -x M -y M "Paste" p "paste-buffer -p" "Copy Mode" c "copy-mode" "#{?mouse_line,Copy Line,}" l 'copy-mode -q ; set-buffer "#{q:mouse_line}"' "#{?mouse_word,Copy Word,}" w 'copy-mode -q ; set-buffer "#{q:mouse_word}"' "" "Horizontal Split" H "split-window -h" "Vertical Split" V "split-window -v" "" "Kill Pane" X "kill-pane" "#{?window_zoomed_flag,Unzoom,Zoom}" z "resize-pane -Z" 2>/dev/null
 ${tmuxStatusConfig}
 
 # ═══════════════════════════════════════════════════════════════

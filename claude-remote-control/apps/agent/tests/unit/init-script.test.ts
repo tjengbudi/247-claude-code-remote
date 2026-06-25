@@ -44,6 +44,26 @@ describe('init-script', () => {
       expect(script).toContain('exec bash -i');
     });
 
+    it('configures a custom right-click menu with Paste + Copy and set-clipboard', async () => {
+      const { generateInitScript } = await import('../../src/lib/init-script.js');
+
+      const script = generateInitScript({
+        sessionName: 'my-session',
+        projectName: 'my-project',
+        shell: 'bash',
+        targetShell: 'bash',
+      });
+
+      // OSC52 passthrough where supported; copies still land in the tmux buffer.
+      expect(script).toContain('tmux set-option -t "my-session" set-clipboard on');
+      // Custom MouseDown3Pane menu the default tmux menu lacks.
+      expect(script).toContain('tmux bind-key -T root MouseDown3Pane display-menu');
+      expect(script).toContain('"Paste" p "paste-buffer -p"');
+      expect(script).toContain('"Copy Mode" c "copy-mode"');
+      expect(script).toContain('Copy Line');
+      expect(script).toContain('Copy Word');
+    });
+
     it('includes custom env vars in script', async () => {
       const { generateInitScript } = await import('../../src/lib/init-script.js');
 
