@@ -21,6 +21,7 @@ import { writeClipboard } from '@/lib/clipboard';
 import { createImeReconciler } from '../lib/imeComposition';
 import { createRightClickHandlers } from '../lib/rightClick';
 import { cellFromPoint, selectionRange } from '../lib/touchSelection';
+import { createMagnifier, type MagnifierController } from '../lib/magnifier';
 
 interface UseTerminalConnectionProps {
   terminalRef: React.RefObject<HTMLDivElement | null>;
@@ -170,6 +171,7 @@ export function useTerminalConnection({
     let imeTextarea: HTMLTextAreaElement | null = null;
     let termElement: HTMLElement | null = null;
     let touchElement: HTMLElement | null = null;
+    let magnifier: MagnifierController | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let viewportQueries: MediaQueryList[] = [];
 
@@ -343,6 +345,14 @@ export function useTerminalConnection({
           // Selection-mode drag anchor, in ABSOLUTE buffer coordinates.
           let selectAnchor: { col: number; rowAbs: number } | null = null;
 
+          // Magnifier loupe shown under the finger during a selection drag, so
+          // the user can see which cell sits beneath their fingertip (mirrors
+          // the native Android/iOS selection loupe, which can't fire over the
+          // CanvasAddon's pixel-rendered text).
+          magnifier = createMagnifier(xtermScreen, {
+            background: TERMINAL_THEME.background,
+          });
+
           // Maps a touch to a cell using the screen element's live geometry.
           const cellForTouch = (touch: Touch) => {
             const rect = xtermScreen.getBoundingClientRect();
@@ -369,6 +379,7 @@ export function useTerminalConnection({
               e.preventDefault();
               selectAnchor = cellForTouch(e.touches[0]);
               currentTermForTouch.clearSelection();
+              magnifier?.show(e.touches[0].clientX, e.touches[0].clientY);
               return;
             }
             lastTouchY = e.touches[0].clientY;
@@ -391,6 +402,7 @@ export function useTerminalConnection({
                 currentTermForTouch.cols
               );
               if (length > 0) currentTermForTouch.select(col, row, length);
+              magnifier?.show(e.touches[0].clientX, e.touches[0].clientY);
               return;
             }
 
@@ -447,11 +459,13 @@ export function useTerminalConnection({
           handleTouchEnd = () => {
             lastTouchY = null;
             selectAnchor = null;
+            magnifier?.hide();
           };
 
           handleTouchCancel = () => {
             lastTouchY = null;
             selectAnchor = null;
+            magnifier?.hide();
           };
 
           xtermScreen.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -810,6 +824,7 @@ export function useTerminalConnection({
       if (touchElement && handleTouchCancel) {
         touchElement.removeEventListener('touchcancel', handleTouchCancel);
       }
+      magnifier?.destroy();
       if (resizeObserver) {
         resizeObserver.disconnect();
         resizeObserver = null;
