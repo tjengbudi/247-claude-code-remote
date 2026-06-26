@@ -96,13 +96,17 @@ function TaskRow({
         )}
         title="Allocate to session"
       >
-        <option value="">Unassigned</option>
+        <option value="" className="bg-popover text-popover-foreground">
+          Unassigned
+        </option>
         {/* Keep the current allocation visible even if the session has closed. */}
         {task.sessionName && !sessions.some((s) => s.name === task.sessionName) && (
-          <option value={task.sessionName}>{task.sessionName} (closed)</option>
+          <option value={task.sessionName} className="bg-popover text-popover-foreground">
+            {task.sessionName} (closed)
+          </option>
         )}
         {sessions.map((s) => (
-          <option key={s.name} value={s.name}>
+          <option key={s.name} value={s.name} className="bg-popover text-popover-foreground">
             {s.label}
           </option>
         ))}
