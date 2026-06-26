@@ -22,6 +22,8 @@ import { useInAppNotifications } from '@/hooks/useInAppNotifications';
 import { useNotificationPreferences } from '@/hooks/useNotificationPreferences';
 import { useSoundNotifications } from '@/hooks/useSoundNotifications';
 import { useSessionActions } from '@/hooks/useSessionActions';
+import { useTaskActions } from '@/hooks/useTaskActions';
+import { TaskPanel, type AllocatableSession } from '@/components/TaskPanel';
 import { useAuth } from '@/lib/auth/client';
 import { NotificationSettingsPanel } from '@/components/NotificationSettingsPanel';
 import { TokenCoveragePanel } from '@/components/TokenCoveragePanel';
@@ -117,8 +119,21 @@ export function HomeContent() {
   const { killSession, archiveSession, acknowledgeSession } = useSessionActions(agentConnections);
 
   // Get session count per agent for the header
-  const { sessionsByMachine, isWsConnected, refreshMachine, setOnNeedsAttention } =
-    useSessionPolling();
+  const {
+    sessionsByMachine,
+    isWsConnected,
+    refreshMachine,
+    setOnNeedsAttention,
+    getTasksForProject,
+    refreshTasks,
+  } = useSessionPolling();
+
+  // Task actions (create/update/delete) — owner identity threaded for isolation.
+  const taskViewer = useMemo(
+    () => ({ ownerId: currentUserId ?? null, isOwner: false }),
+    [currentUserId]
+  );
+  const { createTask, updateTask, deleteTask } = useTaskActions(agentConnections, taskViewer);
 
   // Register sound notification callback for needs_attention status changes
   useEffect(() => {
@@ -137,6 +152,7 @@ export function HomeContent() {
   const [unifiedManagerOpen, setUnifiedManagerOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
   const [tokenCoverageOpen, setTokenCoverageOpen] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
 
   // Edit machine modal state (for sidebar context menu)
   const [editingMachine, setEditingMachine] = useState<SidebarMachine | null>(null);
@@ -213,6 +229,46 @@ export function HomeContent() {
     }
     return filtered;
   }, [sessionListItems, machineFilter, projectFilter]);
+
+  // Scope for the Tasks panel: the project + machine whose tasks we show.
+  // Precedence: the open session's project → the project filter → first project.
+  const taskScope = useMemo(() => {
+    let project: string | null = null;
+    let machineId: string | null = null;
+
+    if (selectedSession) {
+      project = selectedSession.project;
+      machineId = selectedSession.machineId;
+    } else if (projectFilter) {
+      project = projectFilter;
+      machineId =
+        allSessions.find((s) => s.project === projectFilter)?.machineId ??
+        agentConnections[0]?.id ??
+        null;
+    } else {
+      const first = allSessions[0];
+      project = first?.project ?? null;
+      machineId = first?.machineId ?? agentConnections[0]?.id ?? null;
+    }
+
+    return { project, machineId };
+  }, [selectedSession, projectFilter, allSessions, agentConnections]);
+
+  // Open sessions for the scoped project — the allocation dropdown options.
+  const taskScopeSessions: AllocatableSession[] = useMemo(() => {
+    if (!taskScope.project) return [];
+    return allSessions
+      .filter((s) => s.project === taskScope.project)
+      .map((s) => ({ name: s.name, label: s.name }));
+  }, [allSessions, taskScope.project]);
+
+  const scopedTasks = useMemo(
+    () =>
+      taskScope.machineId && taskScope.project
+        ? getTasksForProject(taskScope.machineId, taskScope.project)
+        : [],
+    [getTasksForProject, taskScope.machineId, taskScope.project]
+  );
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Callback handlers for new layout
@@ -382,6 +438,30 @@ export function HomeContent() {
         <TokenCoveragePanel />
       </SlideOverPanel>
 
+      {/* Tasks Slide-Over Panel (per-project todo list) */}
+      <SlideOverPanel open={tasksOpen} onClose={() => setTasksOpen(false)} title="Tasks">
+        {taskScope.project && taskScope.machineId ? (
+          (() => {
+            // Narrow once so the action callbacks don't need non-null assertions.
+            const scopeMachineId = taskScope.machineId;
+            return (
+              <TaskPanel
+                project={taskScope.project}
+                tasks={scopedTasks}
+                sessions={taskScopeSessions}
+                onCreate={(input) => createTask(scopeMachineId, input)}
+                onUpdate={(taskId, input) => updateTask(scopeMachineId, taskId, input)}
+                onDelete={(taskId) => deleteTask(scopeMachineId, taskId)}
+              />
+            );
+          })()
+        ) : (
+          <p className="text-sm text-white/40">
+            Open or select a project to manage its tasks.
+          </p>
+        )}
+      </SlideOverPanel>
+
       {/* Edit Machine Modal - triggered from Sidebar */}
       {editingMachine && (
         <EditAgentModal
@@ -432,6 +512,10 @@ export function HomeContent() {
           onToggleFullscreen={() => setIsFullscreen((prev) => !prev)}
           onOpenNotificationSettings={() => setNotificationSettingsOpen(true)}
           onOpenTokenCoverage={() => setTokenCoverageOpen(true)}
+          onOpenTasks={() => {
+            if (taskScope.machineId) refreshTasks(taskScope.machineId);
+            setTasksOpen(true);
+          }}
         >
           {/* Main content */}
           {selectedSession ? (

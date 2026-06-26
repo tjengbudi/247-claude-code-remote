@@ -19,6 +19,7 @@ import {
   createSessionRoutes,
   createPairRoutes,
   createHooksRoutes,
+  createTaskRoutes,
 } from './routes/index.js';
 
 // WebSocket
@@ -173,6 +174,9 @@ export async function createServer() {
 
   // Mount hooks routes for Claude Code hook notifications
   app.use('/api/hooks', createHooksRoutes());
+
+  // Mount task routes (per-project todo list)
+  app.use('/api/tasks', createTaskRoutes());
 
   // Handle WebSocket upgrades
   // Token gate sits AHEAD of the empty-whitelist=allow path (websocket-handlers.ts:110)

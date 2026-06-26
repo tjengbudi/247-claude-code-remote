@@ -1,7 +1,13 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'fs';
 import { dirname, join, resolve } from 'path';
-import { CREATE_TABLES_SQL, SCHEMA_VERSION, RETENTION_CONFIG, MIGRATION_16 } from './schema.js';
+import {
+  CREATE_TABLES_SQL,
+  SCHEMA_VERSION,
+  RETENTION_CONFIG,
+  MIGRATION_16,
+  MIGRATION_19,
+} from './schema.js';
 import type { DbSchemaVersion } from './schema.js';
 
 // Database file location: ~/.247/data/agent.db
@@ -96,6 +102,9 @@ function runMigrations(database: Database.Database): void {
       }
       if (currentVersion < 18) {
         migrateToV18(database);
+      }
+      if (currentVersion < 19) {
+        migrateToV19(database);
       }
     }
 
@@ -299,6 +308,26 @@ function migrateToV18(database: Database.Database): void {
   database.exec('CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner_id)');
 
   console.log('[DB] v18 migration: Complete');
+}
+
+/**
+ * Migration to v19: Per-project tasks
+ * Additive — creates the `tasks` table and its indexes. Existing session data
+ * is untouched. Idempotent via CREATE TABLE/INDEX IF NOT EXISTS.
+ */
+function migrateToV19(database: Database.Database): void {
+  console.log('[DB] v19 migration: Adding per-project tasks table');
+
+  database.exec(MIGRATION_19);
+
+  const tableExists = database
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'`)
+    .get();
+  if (!tableExists) {
+    throw new Error('[DB] v19 migration failed: tasks table missing');
+  }
+
+  console.log('[DB] v19 migration: Complete');
 }
 
 /**

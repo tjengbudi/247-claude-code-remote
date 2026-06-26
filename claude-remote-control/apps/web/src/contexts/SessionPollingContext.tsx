@@ -15,7 +15,7 @@ import { openAgentWebSocket } from '@/lib/ws-token';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { wsLogger, pollingLogger, archivedLogger } from '@/lib/logger';
 import { useAuth } from '@/lib/auth/client';
-import type { WSSessionsMessageFromAgent } from '247-shared';
+import type { WSSessionsMessageFromAgent, WSTaskInfo } from '247-shared';
 
 /**
  * Build the per-user view-isolation query string (`owner`/`isOwner`) the agent
@@ -69,6 +69,12 @@ interface SessionPollingContextValue {
    * Used for sound notifications.
    */
   setOnNeedsAttention: (callback: ((sessionName: string) => void) | undefined) => void;
+  /** All tasks for a machine (every project). */
+  getTasksForMachine: (machineId: string) => WSTaskInfo[];
+  /** Tasks for a single project on a machine. */
+  getTasksForProject: (machineId: string, project: string) => WSTaskInfo[];
+  /** Re-fetch tasks for a machine over REST (fallback / on-demand refresh). */
+  refreshTasks: (machineId: string) => Promise<void>;
 }
 
 const SessionPollingContext = createContext<SessionPollingContextValue | null>(null);
@@ -112,6 +118,9 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
     new Map()
   );
   const [loadingMachines, setLoadingMachines] = useState<Set<string>>(new Set());
+  // Per-machine task lists (per-project todo items), kept in sync via the
+  // /sessions WS channel (tasks-list / task-created / task-updated / task-removed).
+  const [tasksByMachine, setTasksByMachine] = useState<Map<string, WSTaskInfo[]>>(new Map());
 
   const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map());
   const wsConnectedRef = useRef<Set<string>>(new Set()); // Track connected machines via ref for polling
@@ -239,6 +248,44 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
         });
       }
 
+      return next;
+    });
+  }, []);
+
+  // ── Task state helpers ──────────────────────────────────────────────────
+  // Replace the whole task list for a machine (from tasks-list / REST refresh).
+  const setTasksList = useCallback((machineId: string, tasks: WSTaskInfo[]) => {
+    setTasksByMachine((prev) => {
+      const next = new Map(prev);
+      next.set(machineId, tasks);
+      return next;
+    });
+  }, []);
+
+  // Insert or replace a single task (from task-created / task-updated).
+  const upsertTask = useCallback((machineId: string, task: WSTaskInfo) => {
+    setTasksByMachine((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(machineId) ?? [];
+      const idx = existing.findIndex((t) => t.id === task.id);
+      const updated =
+        idx === -1 ? [...existing, task] : existing.map((t) => (t.id === task.id ? task : t));
+      next.set(machineId, updated);
+      return next;
+    });
+  }, []);
+
+  // Drop a single task (from task-removed).
+  const removeTask = useCallback((machineId: string, taskId: string) => {
+    setTasksByMachine((prev) => {
+      const next = new Map(prev);
+      const existing = next.get(machineId);
+      if (existing) {
+        next.set(
+          machineId,
+          existing.filter((t) => t.id !== taskId)
+        );
+      }
       return next;
     });
   }, []);
@@ -417,6 +464,20 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
                 // Agent will restart, WebSocket will reconnect automatically
                 break;
 
+              case 'tasks-list':
+                wsLogger.info(`Received tasks-list: ${msg.tasks.length} tasks`);
+                setTasksList(machine.id, msg.tasks);
+                break;
+
+              case 'task-created':
+              case 'task-updated':
+                upsertTask(machine.id, msg.task);
+                break;
+
+              case 'task-removed':
+                removeTask(machine.id, msg.taskId);
+                break;
+
               case 'status-update':
                 wsLogger.info(`Status update: ${msg.session.name} -> ${msg.session.status}`);
                 setSessionsByMachine((prev) => {
@@ -531,7 +592,7 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
         wsLogger.error(`Failed to create WebSocket for ${machine.name}`, err);
       }
     },
-    [machines, removeSession, archiveSession]
+    [machines, removeSession, archiveSession, setTasksList, upsertTask, removeTask]
   );
 
   // Manage WebSocket connections based on online machines
@@ -684,6 +745,44 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
     [sessionsByMachine]
   );
 
+  // Re-fetch a machine's tasks over REST. The WS push keeps tasks live, so this
+  // is only a fallback (e.g. machine without an open WS, or an explicit refresh).
+  const refreshTasks = useCallback(
+    async (machineId: string): Promise<void> => {
+      const machine = machines.find((m) => m.id === machineId);
+      const agentUrl = machine?.config?.agentUrl || 'localhost:4678';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+      try {
+        const qs = viewerParams(viewerRef.current);
+        const response = await fetch(buildApiUrl(agentUrl, `/api/tasks${qs ? `?${qs}` : ''}`), {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('Failed to fetch tasks');
+        const body = (await response.json()) as { tasks: WSTaskInfo[] };
+        setTasksList(machineId, body.tasks ?? []);
+      } catch (err) {
+        pollingLogger.error('Failed to fetch tasks', err);
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+    [machines, setTasksList]
+  );
+
+  // Get all tasks for a machine.
+  const getTasksForMachine = useCallback(
+    (machineId: string): WSTaskInfo[] => tasksByMachine.get(machineId) ?? [],
+    [tasksByMachine]
+  );
+
+  // Get tasks for a single project on a machine.
+  const getTasksForProject = useCallback(
+    (machineId: string, project: string): WSTaskInfo[] =>
+      (tasksByMachine.get(machineId) ?? []).filter((t) => t.project === project),
+    [tasksByMachine]
+  );
+
   const value: SessionPollingContextValue = {
     sessionsByMachine,
     machines,
@@ -697,6 +796,9 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
     getError: (machineId: string) => sessionsByMachine.get(machineId)?.error || null,
     isWsConnected: (machineId: string) => sessionsByMachine.get(machineId)?.wsConnected ?? false,
     setOnNeedsAttention,
+    getTasksForMachine,
+    getTasksForProject,
+    refreshTasks,
   };
 
   return <SessionPollingContext.Provider value={value}>{children}</SessionPollingContext.Provider>;

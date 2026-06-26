@@ -21,8 +21,8 @@ describe('Database Schema', () => {
       expect(Number.isInteger(SCHEMA_VERSION)).toBe(true);
     });
 
-    it('current version is 18', () => {
-      expect(SCHEMA_VERSION).toBe(18);
+    it('current version is 19', () => {
+      expect(SCHEMA_VERSION).toBe(19);
     });
   });
 
@@ -68,6 +68,10 @@ describe('Database Schema', () => {
 
     it('creates schema_version table', () => {
       expect(CREATE_TABLES_SQL).toContain('CREATE TABLE IF NOT EXISTS schema_version');
+    });
+
+    it('creates tasks table', () => {
+      expect(CREATE_TABLES_SQL).toContain('CREATE TABLE IF NOT EXISTS tasks');
     });
 
     it('creates indexes for performance', () => {

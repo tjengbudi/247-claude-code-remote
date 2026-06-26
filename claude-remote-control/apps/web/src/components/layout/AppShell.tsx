@@ -39,6 +39,7 @@ export interface AppShellProps {
   isFullscreen?: boolean;
   onOpenNotificationSettings?: () => void;
   onOpenTokenCoverage?: () => void;
+  onOpenTasks?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -88,6 +89,7 @@ export function AppShell({
   isFullscreen = false,
   onOpenNotificationSettings,
   onOpenTokenCoverage,
+  onOpenTasks,
 }: AppShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -109,6 +111,7 @@ export function AppShell({
           isFullscreen={isFullscreen}
           onOpenNotificationSettings={onOpenNotificationSettings}
           onOpenTokenCoverage={onOpenTokenCoverage}
+          onOpenTasks={onOpenTasks}
         />
         <main className="flex flex-1 flex-col overflow-hidden">{children}</main>
       </div>
@@ -128,6 +131,7 @@ export function AppShell({
         isFullscreen={isFullscreen}
         onOpenNotificationSettings={onOpenNotificationSettings}
         onOpenTokenCoverage={onOpenTokenCoverage}
+        onOpenTasks={onOpenTasks}
       />
 
       {/* Main Content - 3 Panel Layout */}

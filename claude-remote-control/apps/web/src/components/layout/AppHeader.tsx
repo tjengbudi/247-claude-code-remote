@@ -14,6 +14,7 @@ import {
   Minimize2,
   Loader2,
   ShieldCheck,
+  ListTodo,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { spring } from '@/lib/animations';
@@ -35,6 +36,7 @@ interface AppHeaderProps {
   isFullscreen?: boolean;
   onOpenNotificationSettings?: () => void;
   onOpenTokenCoverage?: () => void;
+  onOpenTasks?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -251,6 +253,7 @@ export function AppHeader({
   isFullscreen,
   onOpenNotificationSettings,
   onOpenTokenCoverage,
+  onOpenTasks,
 }: AppHeaderProps) {
   return (
     <header
@@ -304,6 +307,13 @@ export function AppHeader({
       <div className="flex items-center gap-2">
         {!isMobile && (
           <>
+            {onOpenTasks && (
+              <IconButton
+                icon={<ListTodo className="h-5 w-5" />}
+                label="Tasks"
+                onClick={onOpenTasks}
+              />
+            )}
             <IconButton
               icon={<Bell className="h-5 w-5" />}
               label="Notifications"

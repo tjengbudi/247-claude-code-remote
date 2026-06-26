@@ -83,6 +83,47 @@ export interface WSSessionInfo {
   lastStatusChange?: number;
 }
 
+// ============================================================================
+// Task types (per-project todo list, allocatable to a session)
+// ============================================================================
+
+// 'todo' = not started, 'doing' = picked up, 'done' = finished.
+export type TaskStatus = 'todo' | 'doing' | 'done';
+
+/**
+ * A todo item that belongs to a *project* (not a session). One project can have
+ * many open sessions; a task may optionally be allocated to one of them by its
+ * tmux session name (`sessionName`). `null` = not yet allocated.
+ */
+export interface WSTaskInfo {
+  id: string;
+  project: string;
+  title: string;
+  status: TaskStatus;
+  /** tmux session name this task is allocated to, or null when unallocated. */
+  sessionName: string | null;
+  /** Manual ordering within a project (ascending). */
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Body for POST /api/tasks (create). */
+export interface CreateTaskRequest {
+  project: string;
+  title: string;
+  sessionName?: string | null;
+  status?: TaskStatus;
+}
+
+/** Body for PATCH /api/tasks/:id (partial update). */
+export interface UpdateTaskRequest {
+  title?: string;
+  status?: TaskStatus;
+  sessionName?: string | null;
+  sortOrder?: number;
+}
+
 // WebSocket message types - Agent to Client (Sessions channel)
 export type WSSessionsMessageFromAgent =
   | { type: 'sessions-list'; sessions: WSSessionInfo[] }
@@ -90,7 +131,12 @@ export type WSSessionsMessageFromAgent =
   | { type: 'session-archived'; sessionName: string; session: WSSessionInfo }
   | { type: 'status-update'; session: WSSessionInfo }
   | { type: 'version-info'; agentVersion: string }
-  | { type: 'update-pending'; targetVersion: string; message: string };
+  | { type: 'update-pending'; targetVersion: string; message: string }
+  // Task channel (piggybacks the /sessions socket, scoped per owner)
+  | { type: 'tasks-list'; tasks: WSTaskInfo[] }
+  | { type: 'task-created'; task: WSTaskInfo }
+  | { type: 'task-updated'; task: WSTaskInfo }
+  | { type: 'task-removed'; taskId: string };
 
 // API types
 export interface RegisterMachineRequest {

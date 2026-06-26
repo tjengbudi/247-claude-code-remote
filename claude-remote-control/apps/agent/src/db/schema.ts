@@ -31,6 +31,40 @@ export interface DbSchemaVersion {
   applied_at: number;
 }
 
+// Task status persisted in the tasks table (v19).
+export type DbTaskStatus = 'todo' | 'doing' | 'done';
+
+export interface DbTask {
+  id: string;
+  project: string;
+  title: string;
+  status: DbTaskStatus;
+  // tmux session name this task is allocated to, or NULL when unallocated.
+  session_name: string | null;
+  sort_order: number;
+  // Per-user view isolation, mirrors sessions.owner_id (v18). NULL = owner-only.
+  owner_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CreateTaskInput {
+  id: string;
+  project: string;
+  title: string;
+  status?: DbTaskStatus;
+  sessionName?: string | null;
+  sortOrder?: number;
+  ownerId?: string | null;
+}
+
+export interface UpdateTaskInput {
+  title?: string;
+  status?: DbTaskStatus;
+  sessionName?: string | null;
+  sortOrder?: number;
+}
+
 // ============================================================================
 // Input Types for Operations
 // ============================================================================
@@ -49,10 +83,10 @@ export interface UpsertSessionInput {
 }
 
 // ============================================================================
-// SQL Schema Definitions (v18 - Per-user view isolation)
+// SQL Schema Definitions (v19 - Per-project tasks)
 // ============================================================================
 
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 export const CREATE_TABLES_SQL = `
 -- Sessions: current state of terminal sessions with status tracking
@@ -80,11 +114,54 @@ CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity)
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_owner ON sessions(owner_id);
 
+-- Tasks: per-project todo items, optionally allocated to a session (v19).
+-- project is the same denormalized folder-name key used by sessions.project;
+-- session_name mirrors sessions.name (the unique key used everywhere). NULL
+-- session_name = task not yet allocated to any open session.
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'todo',
+  session_name TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  owner_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project);
+CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_name);
+
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY,
   applied_at INTEGER NOT NULL
 );
+`;
+
+// ============================================================================
+// Migration for v19 (Add per-project tasks table)
+// ============================================================================
+
+// Additive: a brand-new table + its indexes. Safe to run repeatedly via IF NOT EXISTS.
+export const MIGRATION_19 = `
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'todo',
+  session_name TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  owner_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project);
+CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_name);
 `;
 
 // ============================================================================

@@ -8,8 +8,14 @@ import { execSync } from 'child_process';
 import { createTerminal } from './terminal.js';
 import { config } from './config.js';
 import * as sessionsDb from './db/sessions.js';
+import * as tasksDb from './db/tasks.js';
 import type { ViewerContext } from './db/sessions.js';
-import type { WSMessageToAgent, WSSessionInfo, WSSessionsMessageFromAgent } from '247-shared';
+import type {
+  WSMessageToAgent,
+  WSSessionInfo,
+  WSSessionsMessageFromAgent,
+  WSTaskInfo,
+} from '247-shared';
 import { getAgentVersion, needsUpdate } from './version.js';
 import { triggerUpdate, isUpdateInProgress } from './updater.js';
 
@@ -114,6 +120,36 @@ export function broadcastStatusUpdate(session: WSSessionInfo): void {
   );
 
   broadcastToViewersOf(session.name, JSON.stringify(message));
+}
+
+/**
+ * Broadcast a task create/update to the subscribers allowed to see it.
+ * Reuses the session owner-scope filter (`broadcastToViewersOf`) by passing the
+ * task's owner explicitly — visibility rules for tasks and sessions are identical.
+ */
+export function broadcastTaskUpserted(
+  task: WSTaskInfo,
+  ownerId: string | null,
+  kind: 'created' | 'updated'
+): void {
+  const message: WSSessionsMessageFromAgent = {
+    type: kind === 'created' ? 'task-created' : 'task-updated',
+    task,
+  };
+  // The session name is irrelevant here; ownerId drives the filter.
+  broadcastToViewersOf('', JSON.stringify(message), ownerId);
+}
+
+/**
+ * Broadcast a task removal. ownerId is captured before the row is deleted so the
+ * lookup doesn't miss (row gone) — same pattern as broadcastSessionRemoved.
+ */
+export function broadcastTaskRemoved(taskId: string, ownerId: string | null): void {
+  const message: WSSessionsMessageFromAgent = {
+    type: 'task-removed',
+    taskId,
+  };
+  broadcastToViewersOf('', JSON.stringify(message), ownerId);
 }
 
 /**
@@ -371,6 +407,17 @@ export function handleSessionsConnection(ws: WebSocket, url?: URL): void {
       agentVersion,
     };
     ws.send(JSON.stringify(versionMessage));
+  }
+
+  // Send the initial task list for this viewer (per-owner isolation applied).
+  if (ws.readyState === WebSocket.OPEN) {
+    try {
+      const tasks = tasksDb.listTasks(viewer).map(tasksDb.taskToWire);
+      const tasksMessage: WSSessionsMessageFromAgent = { type: 'tasks-list', tasks };
+      ws.send(JSON.stringify(tasksMessage));
+    } catch (err) {
+      console.error('[Sessions WS] Failed to get initial tasks:', err);
+    }
   }
 
   // Check if update needed (only upgrade, never downgrade)

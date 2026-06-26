@@ -126,6 +126,7 @@ describe('v17 → v18 migration', () => {
       seed.close();
 
       const { initDatabase, closeDatabase } = await import('../../src/db/index.js');
+      const { SCHEMA_VERSION } = await import('../../src/db/schema.js');
       const db = initDatabase(dbPath);
 
       const after = (db.pragma('table_info(sessions)') as Array<{ name: string }>).map((c) => c.name);
@@ -137,8 +138,14 @@ describe('v17 → v18 migration', () => {
       };
       expect(row.owner_id).toBeNull();
 
+      // The v19 migration also brings the tasks table into existence.
+      const tasksTable = db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'`)
+        .get();
+      expect(tasksTable).toBeTruthy();
+
       const ver = db.prepare('SELECT MAX(version) as v FROM schema_version').get() as { v: number };
-      expect(ver.v).toBe(18);
+      expect(ver.v).toBe(SCHEMA_VERSION);
 
       closeDatabase();
     } finally {
