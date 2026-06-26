@@ -65,6 +65,24 @@ open https://247.quivr.com
 
 **Cloud VMs** - Don't want to run the agent on your machine? Spin up a VM on Fly.io with one click. Full isolation, auto-shutdown when idle.
 
+## Copy & Paste
+
+**Desktop**
+- **Copy** — hold **Shift** and drag to select, then **Ctrl/Cmd+C** (or the Copy button).
+- **Paste** — **Ctrl/Cmd+V**, or the right-click menu (see below).
+- **Right-click** — opens the tmux menu. Menu items don't respond to hover here,
+  so **press the item's letter**: `p` Paste · `c` Copy Mode · `l` Copy Line · `w` Copy Word.
+
+**Mobile**
+- **Copy** — tap the **Select** button (text-cursor icon), drag a finger to select,
+  then tap **Copy selection**.
+- **Paste** — tap the **Paste** button. If your browser blocks clipboard access
+  (e.g. plain-HTTP LAN), a paste box opens: long-press → **Paste**, then **Insert**.
+
+> Over a plain-HTTP LAN address the browser Clipboard API is unavailable, so copy
+> falls back to a legacy path and paste uses the paste box. On HTTPS (the hosted
+> domain or an installed PWA) the native clipboard is used directly.
+
 ## Architecture
 
 ```
