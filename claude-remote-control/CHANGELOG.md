@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.45.0] - 2026-06-26
+
+### Features
+
+- **tasks**: per-project todo list allocatable to sessions (be111bc)
+- **web**: magnifier loupe for mobile touch selection (bc49614)
+- **agent**: custom tmux right-click menu with Paste + Copy (95aa103)
+- per-user session view isolation (soft) (dc369da)
+- add Sign up link to landing header (b41530d)
+- add multi-user signup page and API route (92eb308)
+- **story-5.4**: E2E + integration tests for both pairing paths (ad9bd7f)
+- **story-5.3**: revive 6-digit pairing path B — producer + consumer (e00650b)
+- **story-5.2**: deployed token-coverage surface behind auth seam (3460779)
+- **story-5.1**: code-review hardening — 4 patches + 1 regression test (96faa54)
+- **story-4.5**: dev auto-seed + Docker/env cutover (code-review hardened) (4e3383f)
+- **story-4.4**: swap neonAuth→requireUser, retire Neon client across all sites (8701e82)
+- **story-4.3**: first-run bootstrap + login UI (code review hardening) (0b336fb)
+- **story-4.2**: explicit auth API routes + useAuth client hook (1ed2078)
+- **story-3.4**: harden CLI — redact agent token, preserve custom port (0f630e0)
+- **story-3.4**: flip agent token enforcement ON behind coverage gate (a09be44)
+- **story-3.3**: enforce agent token + send from web client (enforcement OFF) (031705b)
+- **story-3.2**: carry agentAuthToken through the pairing flow (1442c11)
+- **story-3.1**: define agentAuthToken contract in 247-shared (2beeb94)
+- **story-2.1**: generate-once secrets preserved across 247 init and --force (8df4aa9)
+- **web**: swap database driver to better-sqlite3 with WEB_DB_PATH location (4b70f69)
+- **dx**: add tmux-based local development environment (#14) (ff110f6)
+
+### Bug Fixes
+
+- **agent**: make tmux right-click menu usable via mnemonic keys (0b15669)
+- **web**: right-click shows tmux menu only, not a paste action (3916413)
+- **web**: copy/paste/select in terminal over LAN HTTP (ff82a47)
+- **terminal**: dedup IME composition flush on mobile (Gboard "cek "→"cekcek") (cf971d6)
+- **agent**: advertise LAN IP for pairing + guard loopback URLs (5ad5eff)
+- **story-5.3**: return consistent 200+valid:false for invalid pairing codes (1245da5)
+- **story-5.6**: insert resetModules + re-import between two parseAsync calls (0ba9194)
+- **web-auth**: defer instrumentation Node imports past runtime guard (7b1c0ca)
+- **story-4.1**: code review hardening — 6 patches + tests (9c872f3)
+- **web**: remove @neondatabase/serverless dependency and trace include (69d5608)
+- **cli**: preserve non-secret config state on re-init from code review (a69015f)
+- **web**: harden better-sqlite3 driver init from code review (0eadb53)
+- **web**: warn when WAL journal mode is not applied to web.db (e0bed63)
+- **mobile**: remove non-functional buttons from mobile header (56726c8)
+
+### Documentation
+
+- **readme**: add Copy & Paste usage (desktop + mobile) (ae966b6)
+- **story-4.6**: self-host migration guide + code-review fixes (3044ef7)
+
+### Tests
+
+- **web**: de-flake token-coverage suite — in-process run(), no tsx spawns (3b55775)
+- align pair/code unknown-code assertion with 200 valid:false (a458432)
+- **web-auth**: guard instrumentation against top-level Node imports (279c211)
+- **cli**: cover secret preservation across repeated init --force (357df13)
+- **web**: add route-level E2E tests and fix cross-user push scoping (a9d0f96)
+
+### Chores
+
+- **web**: add start-web.sh — build, copy standalone assets, restart cleanly (551750e)
+- mark shell scripts executable (chmod +x) (d1893c1)
+- **release**: v2.44.2 (5762dfc)
+
 ## [2.44.2] - 2026-01-31
 
 ### Bug Fixes
