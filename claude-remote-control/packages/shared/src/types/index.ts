@@ -362,3 +362,45 @@ export type SafeRefInput = string;
 export type SafeRefValid = { valid: true; normalized: string };
 export type SafeRefInvalid = { valid: false; reason: string };
 export type SafeRefResult = SafeRefValid | SafeRefInvalid;
+
+// ============================================================================
+// Git Write Action Types (Epic 6 — Story 6.4)
+// ============================================================================
+
+export interface GitWriteResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface GitStageRequest {
+  project: string;
+  repo: string;
+  pathspecs: string[];
+  all?: boolean;
+}
+
+export interface GitUnstageRequest {
+  project: string;
+  repo: string;
+  pathspecs: string[];
+  all?: boolean;
+}
+
+export interface GitCommitRequest {
+  project: string;
+  repo: string;
+  message: string;
+}
+
+export interface GitPushPullRequest {
+  project: string;
+  repo: string;
+}
+
+export interface GitBranchRequest {
+  project: string;
+  repo: string;
+  name: string;
+  create?: boolean;
+}
+

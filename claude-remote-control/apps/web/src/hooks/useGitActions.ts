@@ -36,6 +36,37 @@ interface UseGitActionsReturn {
     repo: string,
     maxCommits?: number
   ) => Promise<{ commits: GitCommit[]; capped: boolean } | null>;
+  stageFiles: (
+    machineId: string,
+    repo: string,
+    pathspecs: string[],
+    all?: boolean
+  ) => Promise<boolean>;
+  unstageFiles: (
+    machineId: string,
+    repo: string,
+    pathspecs: string[],
+    all?: boolean
+  ) => Promise<boolean>;
+  commitChanges: (
+    machineId: string,
+    repo: string,
+    message: string
+  ) => Promise<boolean>;
+  pushChanges: (
+    machineId: string,
+    repo: string
+  ) => Promise<boolean>;
+  pullChanges: (
+    machineId: string,
+    repo: string
+  ) => Promise<boolean>;
+  switchBranch: (
+    machineId: string,
+    repo: string,
+    name: string,
+    create?: boolean
+  ) => Promise<boolean>;
 }
 
 /**
@@ -210,5 +241,221 @@ export function useGitActions(
     [findMachine, withViewer]
   );
 
-  return { fetchLog, fetchCommit, fetchDiff, fetchGraph };
+  const stageFiles = useCallback(
+    async (
+      machineId: string,
+      repo: string,
+      pathspecs: string[],
+      all = false
+    ): Promise<boolean> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return false;
+      }
+
+      try {
+        const url = buildApiUrl(machine.url, '/api/git/stage');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: machine.id, repo, pathspecs, all }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Failed to stage files' }));
+          toast.error(err.error || 'Failed to stage files');
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.error('Failed to stage files:', err);
+        toast.error('Could not connect to agent');
+        return false;
+      }
+    },
+    [findMachine]
+  );
+
+  const unstageFiles = useCallback(
+    async (
+      machineId: string,
+      repo: string,
+      pathspecs: string[],
+      all = false
+    ): Promise<boolean> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return false;
+      }
+
+      try {
+        const url = buildApiUrl(machine.url, '/api/git/unstage');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: machine.id, repo, pathspecs, all }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Failed to unstage files' }));
+          toast.error(err.error || 'Failed to unstage files');
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.error('Failed to unstage files:', err);
+        toast.error('Could not connect to agent');
+        return false;
+      }
+    },
+    [findMachine]
+  );
+
+  const commitChanges = useCallback(
+    async (
+      machineId: string,
+      repo: string,
+      message: string
+    ): Promise<boolean> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return false;
+      }
+
+      try {
+        const url = buildApiUrl(machine.url, '/api/git/commit');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: machine.id, repo, message }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Failed to commit' }));
+          toast.error(err.error || 'Failed to commit');
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.error('Failed to commit:', err);
+        toast.error('Could not connect to agent');
+        return false;
+      }
+    },
+    [findMachine]
+  );
+
+  const pushChanges = useCallback(
+    async (machineId: string, repo: string): Promise<boolean> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return false;
+      }
+
+      try {
+        const url = buildApiUrl(machine.url, '/api/git/push');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: machine.id, repo }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Failed to push' }));
+          toast.error(err.error || 'Failed to push');
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.error('Failed to push:', err);
+        toast.error('Could not connect to agent');
+        return false;
+      }
+    },
+    [findMachine]
+  );
+
+  const pullChanges = useCallback(
+    async (machineId: string, repo: string): Promise<boolean> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return false;
+      }
+
+      try {
+        const url = buildApiUrl(machine.url, '/api/git/pull');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: machine.id, repo }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Failed to pull' }));
+          toast.error(err.error || 'Failed to pull');
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.error('Failed to pull:', err);
+        toast.error('Could not connect to agent');
+        return false;
+      }
+    },
+    [findMachine]
+  );
+
+  const switchBranch = useCallback(
+    async (
+      machineId: string,
+      repo: string,
+      name: string,
+      create = false
+    ): Promise<boolean> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return false;
+      }
+
+      try {
+        const url = buildApiUrl(machine.url, '/api/git/branch');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: machine.id, repo, name, create }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Failed to switch branch' }));
+          toast.error(err.error || 'Failed to switch branch');
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.error('Failed to switch branch:', err);
+        toast.error('Could not connect to agent');
+        return false;
+      }
+    },
+    [findMachine]
+  );
+
+  return {
+    fetchLog,
+    fetchCommit,
+    fetchDiff,
+    fetchGraph,
+    stageFiles,
+    unstageFiles,
+    commitChanges,
+    pushChanges,
+    pullChanges,
+    switchBranch,
+  };
 }

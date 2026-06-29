@@ -1343,3 +1343,216 @@ describe('getGraph', () => {
     expect(result.commits).toHaveLength(0);
   });
 });
+
+// ============================================================================
+// 11. Write actions — argv safety + stderr classification (Story 6.4)
+// ============================================================================
+
+describe('stagePaths — argv construction', () => {
+  let stagePaths: typeof import('../../src/lib/git.js').stagePaths;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+    stagePaths = (await import('../../src/lib/git.js')).stagePaths;
+  });
+
+  it('passes pathspec with spaces as single inert argv element', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, ''));
+    await stagePaths('/repo', ['path with spaces/file.ts']);
+    const [, argv] = spawnMock.mock.calls[0];
+    expect(argv).toContain('path with spaces/file.ts');
+    expect(argv).toContain('--');
+    expect(argv.indexOf('--')).toBeLessThan(argv.indexOf('path with spaces/file.ts'));
+  });
+
+  it('passes pathspec with shell metacharacters as single inert argv element', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, ''));
+    await stagePaths('/repo', ['src/;rm -rf /.ts']);
+    const [, argv] = spawnMock.mock.calls[0];
+    const specIdx = argv.findIndex((a: string) => a.includes(';rm'));
+    expect(specIdx).toBeGreaterThan(-1);
+    expect(argv[specIdx]).toBe('src/;rm -rf /.ts');
+  });
+
+  it('throws on non-zero exit', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'error: some git error'));
+    await expect(stagePaths('/repo', ['file.ts'])).rejects.toThrow('stage failed');
+  });
+});
+
+describe('commit — argv + stderr classification', () => {
+  let commitFn: typeof import('../../src/lib/git.js').commit;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+    commitFn = (await import('../../src/lib/git.js')).commit;
+  });
+
+  it('passes message with semicolons as single argv element', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, ''));
+    await commitFn('/repo', 'fix; drop table users');
+    const [, argv] = spawnMock.mock.calls[0];
+    expect(argv).toContain('-m');
+    const mIdx = argv.indexOf('-m');
+    expect(argv[mIdx + 1]).toBe('fix; drop table users');
+  });
+
+  it('classifies "nothing to commit" stderr as actionable', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'nothing to commit, working tree clean'));
+    await expect(commitFn('/repo', 'msg')).rejects.toThrow('no staged changes to commit');
+  });
+
+  it('classifies missing author identity stderr as actionable', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'Please tell me who you are.'));
+    await expect(commitFn('/repo', 'msg')).rejects.toThrow('set git user.name/user.email on the host');
+  });
+
+  it('falls through to generic error on unknown stderr', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'unknown error'));
+    await expect(commitFn('/repo', 'msg')).rejects.toThrow('commit failed');
+  });
+});
+
+describe('push — network mode + stderr classification', () => {
+  let pushFn: typeof import('../../src/lib/git.js').push;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+    pushFn = (await import('../../src/lib/git.js')).push;
+  });
+
+  it('sets GIT_TERMINAL_PROMPT=0 (network mode)', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, ''));
+    await pushFn('/repo');
+    const [, , opts] = spawnMock.mock.calls[0];
+    expect(opts.env.GIT_TERMINAL_PROMPT).toBe('0');
+    expect(opts.env.GIT_SSH_COMMAND).toContain('BatchMode=yes');
+  });
+
+  it('does NOT emit --force or --force-with-lease', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, ''));
+    await pushFn('/repo');
+    const [, argv] = spawnMock.mock.calls[0];
+    const joined = argv.join(' ');
+    expect(joined).not.toContain('--force');
+    expect(joined).not.toContain('--force-with-lease');
+    expect(joined).not.toMatch(/\+[^/]/);
+  });
+
+  it('classifies no-upstream stderr', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'has no upstream branch'));
+    await expect(pushFn('/repo')).rejects.toThrow('no upstream configured for this branch');
+  });
+
+  it('classifies auth failure stderr', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'Authentication failed for'));
+    await expect(pushFn('/repo')).rejects.toThrow('authentication required');
+  });
+
+  it('classifies non-fast-forward stderr', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'Updates were rejected because the remote contains work that you do\nnon-fast-forward'));
+    await expect(pushFn('/repo')).rejects.toThrow('push rejected (non-fast-forward)');
+  });
+});
+
+describe('switchBranch — validateSafeRef + dirty-tree classification', () => {
+  let branchFn: typeof import('../../src/lib/git.js').branch;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+    branchFn = (await import('../../src/lib/git.js')).branch;
+  });
+
+  it('passes branch name as single inert argv element', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, ''));
+    await branchFn('/repo', 'feat/my-feature', false);
+    const [, argv] = spawnMock.mock.calls[0];
+    expect(argv).toContain('feat/my-feature');
+    expect(argv[argv.length - 1]).toBe('feat/my-feature');
+  });
+
+  it('rejects branch name with leading dash (injection risk)', async () => {
+    await expect(branchFn('/repo', '-bad', false)).rejects.toThrow(/dash/);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects branch name with ".." (range syntax)', async () => {
+    await expect(branchFn('/repo', 'main..evil', false)).rejects.toThrow(/\.\./);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('classifies dirty-tree stderr as actionable', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'Your local changes to the following files would be overwritten by checkout'));
+    await expect(branchFn('/repo', 'other', false)).rejects.toThrow('uncommitted changes would be overwritten');
+  });
+
+  it('uses switch -c for create=true', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, ''));
+    await branchFn('/repo', 'new-branch', true);
+    const [, argv] = spawnMock.mock.calls[0];
+    expect(argv).toContain('-c');
+    expect(argv).toContain('new-branch');
+  });
+});
+
+describe('pull — network mode + stdout/stderr classification', () => {
+  let pullFn: typeof import('../../src/lib/git.js').pull;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+    pullFn = (await import('../../src/lib/git.js')).pull;
+  });
+
+  it('sets GIT_TERMINAL_PROMPT=0 (network mode)', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, ''));
+    await pullFn('/repo');
+    const [, , opts] = spawnMock.mock.calls[0];
+    expect(opts.env.GIT_TERMINAL_PROMPT).toBe('0');
+    expect(opts.env.GIT_SSH_COMMAND).toContain('BatchMode=yes');
+  });
+
+  it('classifies no-upstream stderr', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'has no upstream branch'));
+    await expect(pullFn('/repo')).rejects.toThrow('no upstream configured for this branch');
+  });
+
+  it('classifies auth failure stderr', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'Authentication failed for'));
+    await expect(pullFn('/repo')).rejects.toThrow('authentication required');
+  });
+
+  it('classifies conflict from stderr (merge path)', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'CONFLICT (content): Merge conflict in src/foo.ts'));
+    await expect(pullFn('/repo')).rejects.toThrow('pull produced conflicts — resolve on the host');
+  });
+
+  it('classifies conflict from stdout (git pull standard output)', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, 'CONFLICT (content): Merge conflict in src/foo.ts\n', ''));
+    await expect(pullFn('/repo')).rejects.toThrow('pull produced conflicts — resolve on the host');
+  });
+
+  it('falls through to generic error on unknown failure', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'some unknown error'));
+    await expect(pullFn('/repo')).rejects.toThrow('pull failed');
+  });
+});

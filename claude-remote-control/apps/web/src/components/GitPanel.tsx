@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History } from 'lucide-react';
+import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GitRepoStatus, GitFileInfo, GitCommit, GitCommitWithDiff } from '247-shared';
 import { GitHistory } from './GitHistory';
@@ -29,6 +29,13 @@ interface GitPanelProps {
   onToggleGraph: () => void;
   onFetchCommit: (hash: string) => Promise<GitCommitWithDiff | null>;
   onFetchDiff: (hash: string, file: string) => Promise<string | null>;
+  // Write actions (Story 6.4)
+  onStage?: (repo: string, pathspecs: string[], all?: boolean) => Promise<boolean>;
+  onUnstage?: (repo: string, pathspecs: string[], all?: boolean) => Promise<boolean>;
+  onCommit?: (repo: string, message: string) => Promise<boolean>;
+  onPush?: (repo: string) => Promise<boolean>;
+  onPull?: (repo: string) => Promise<boolean>;
+  onSwitchBranch?: (repo: string, name: string, create?: boolean) => Promise<boolean>;
 }
 
 type TabView = 'status' | 'history';
@@ -72,8 +79,30 @@ function FileRow({ file }: { file: GitFileInfo }) {
   );
 }
 
-function RepoGroup({ repo }: { repo: GitRepoView }) {
+function RepoGroup({
+  repo,
+  onStage,
+  onUnstage,
+  onCommit,
+  onPush,
+  onPull,
+  onSwitchBranch,
+}: {
+  repo: GitRepoView;
+  onStage?: (repo: string, pathspecs: string[], all?: boolean) => Promise<boolean>;
+  onUnstage?: (repo: string, pathspecs: string[], all?: boolean) => Promise<boolean>;
+  onCommit?: (repo: string, message: string) => Promise<boolean>;
+  onPush?: (repo: string) => Promise<boolean>;
+  onPull?: (repo: string) => Promise<boolean>;
+  onSwitchBranch?: (repo: string, name: string, create?: boolean) => Promise<boolean>;
+}) {
   const [expanded, setExpanded] = useState(true);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [showCommitConfirm, setShowCommitConfirm] = useState(false);
+  const [showPushConfirm, setShowPushConfirm] = useState(false);
+  const [showPullConfirm, setShowPullConfirm] = useState(false);
+  const [branchInput, setBranchInput] = useState('');
+  const [showBranchInput, setShowBranchInput] = useState(false);
 
   if (repo.error) {
     return (
@@ -133,13 +162,82 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
             <span className="font-medium text-white/70">{branchName}</span>
             {branch.ahead > 0 && <span className="text-emerald-400">↑{branch.ahead}</span>}
             {branch.behind > 0 && <span className="text-amber-400">↓{branch.behind}</span>}
+            {/* Push/Pull buttons */}
+            <div className="ml-auto flex gap-1">
+              {onPull && (
+                <>
+                  <button
+                    onClick={() => setShowPullConfirm(true)}
+                    className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white/70"
+                    title="Pull"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </button>
+                  {showPullConfirm && (
+                    <button
+                      onClick={() => {
+                        setShowPullConfirm(false);
+                        void onPull(repo.repoPath);
+                      }}
+                      className="rounded bg-amber-500/20 p-1 text-amber-400 hover:bg-amber-500/30"
+                      title="Confirm pull"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </>
+              )}
+              {onPush && (
+                <>
+                  <button
+                    onClick={() => setShowPushConfirm(true)}
+                    className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white/70"
+                    title="Push"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                  </button>
+                  {showPushConfirm && (
+                    <button
+                      onClick={() => {
+                        setShowPushConfirm(false);
+                        void onPush(repo.repoPath);
+                      }}
+                      className="rounded bg-emerald-500/20 p-1 text-emerald-400 hover:bg-emerald-500/30"
+                      title="Confirm push"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </>
+              )}
+              {onSwitchBranch && (
+                <button
+                  onClick={() => setShowBranchInput(v => !v)}
+                  className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white/70"
+                  title="Switch / create branch"
+                >
+                  <GitBranch className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           {staged.length > 0 && (
             <div className="mb-3">
-              <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-white/40">
-                Staged ({staged.length})
-              </h4>
+              <div className="mb-1 flex items-center">
+                <h4 className="text-xs font-medium uppercase tracking-wide text-white/40">
+                  Staged ({staged.length})
+                </h4>
+                {onUnstage && (
+                  <button
+                    onClick={() => onUnstage(repo.repoPath, staged.map(f => f.path), true)}
+                    className="ml-auto rounded p-0.5 text-white/30 hover:bg-white/10 hover:text-white/60"
+                    title="Unstage all"
+                  >
+                    <Minus className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
               <div className="space-y-0.5">
                 {staged.map(f => <FileRow key={f.path} file={f} />)}
               </div>
@@ -148,9 +246,20 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
 
           {changes.length > 0 && (
             <div className="mb-3">
-              <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-white/40">
-                Changes ({changes.length})
-              </h4>
+              <div className="mb-1 flex items-center">
+                <h4 className="text-xs font-medium uppercase tracking-wide text-white/40">
+                  Changes ({changes.length})
+                </h4>
+                {onStage && (
+                  <button
+                    onClick={() => onStage(repo.repoPath, changes.map(f => f.path), false)}
+                    className="ml-auto rounded p-0.5 text-white/30 hover:bg-white/10 hover:text-white/60"
+                    title="Stage all changes"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
               <div className="space-y-0.5">
                 {changes.map(f => <FileRow key={f.path} file={f} />)}
               </div>
@@ -158,10 +267,21 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
           )}
 
           {untracked.length > 0 && (
-            <div>
-              <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-white/40">
-                Untracked ({untracked.length})
-              </h4>
+            <div className="mb-3">
+              <div className="mb-1 flex items-center">
+                <h4 className="text-xs font-medium uppercase tracking-wide text-white/40">
+                  Untracked ({untracked.length})
+                </h4>
+                {onStage && (
+                  <button
+                    onClick={() => onStage(repo.repoPath, untracked.map(f => f.path), false)}
+                    className="ml-auto rounded p-0.5 text-white/30 hover:bg-white/10 hover:text-white/60"
+                    title="Stage all untracked"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
               <div className="space-y-0.5">
                 {untracked.map(f => <FileRow key={f.path} file={f} />)}
               </div>
@@ -170,6 +290,89 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
 
           {totalChanges === 0 && (
             <p className="text-sm text-white/30">Working tree clean</p>
+          )}
+
+          {/* Commit form */}
+          {onCommit && staged.length > 0 && (
+            <div className="mt-2 border-t border-white/5 pt-2">
+              <input
+                type="text"
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                placeholder="Commit message"
+                className="mb-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/90 placeholder:text-white/30 outline-none focus:border-white/20"
+              />
+              {!showCommitConfirm ? (
+                <button
+                  onClick={() => commitMessage.trim() && setShowCommitConfirm(true)}
+                  disabled={!commitMessage.trim()}
+                  className="w-full rounded bg-white/10 px-2 py-1 text-xs text-white/70 hover:bg-white/20 disabled:opacity-30 disabled:hover:bg-white/10"
+                >
+                  Commit {staged.length} staged file{staged.length !== 1 ? 's' : ''}
+                </button>
+              ) : (
+                <div>
+                  <p className="mb-1 truncate text-xs text-white/50" title={commitMessage}>
+                    &ldquo;{commitMessage.trim()}&rdquo;
+                  </p>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={async () => {
+                        setShowCommitConfirm(false);
+                        const ok = await onCommit(repo.repoPath, commitMessage.trim());
+                        if (ok) setCommitMessage('');
+                      }}
+                      className="flex-1 rounded bg-emerald-500/20 px-2 py-1 text-xs text-emerald-400 hover:bg-emerald-500/30"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setShowCommitConfirm(false)}
+                      className="flex-1 rounded bg-white/10 px-2 py-1 text-xs text-white/50 hover:bg-white/20"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Branch switch / create */}
+          {onSwitchBranch && showBranchInput && (
+            <div className="mt-2 border-t border-white/5 pt-2">
+              <input
+                type="text"
+                value={branchInput}
+                onChange={(e) => setBranchInput(e.target.value)}
+                placeholder="Branch name"
+                className="mb-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/90 placeholder:text-white/30 outline-none focus:border-white/20"
+              />
+              <div className="flex gap-1">
+                <button
+                  onClick={async () => {
+                    if (!branchInput.trim()) return;
+                    const ok = await onSwitchBranch(repo.repoPath, branchInput.trim(), false);
+                    if (ok) { setBranchInput(''); setShowBranchInput(false); }
+                  }}
+                  disabled={!branchInput.trim()}
+                  className="flex-1 rounded bg-white/10 px-2 py-1 text-xs text-white/70 hover:bg-white/20 disabled:opacity-30"
+                >
+                  Switch
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!branchInput.trim()) return;
+                    const ok = await onSwitchBranch(repo.repoPath, branchInput.trim(), true);
+                    if (ok) { setBranchInput(''); setShowBranchInput(false); }
+                  }}
+                  disabled={!branchInput.trim()}
+                  className="flex-1 rounded bg-white/10 px-2 py-1 text-xs text-white/70 hover:bg-white/20 disabled:opacity-30"
+                >
+                  Create
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -218,6 +421,12 @@ export function GitPanel({
   onToggleGraph,
   onFetchCommit,
   onFetchDiff,
+  onStage,
+  onUnstage,
+  onCommit,
+  onPush,
+  onPull,
+  onSwitchBranch,
 }: GitPanelProps) {
   const [activeTab, setActiveTab] = useState<TabView>('status');
 
@@ -275,7 +484,16 @@ export function GitPanel({
       {activeTab === 'status' ? (
         <div className="flex flex-1 flex-col gap-3 overflow-auto p-4">
           {repos.map(repo => (
-            <RepoGroup key={repo.repoPath} repo={repo} />
+            <RepoGroup
+              key={repo.repoPath}
+              repo={repo}
+              onStage={onStage}
+              onUnstage={onUnstage}
+              onCommit={onCommit}
+              onPush={onPush}
+              onPull={onPull}
+              onSwitchBranch={onSwitchBranch}
+            />
           ))}
         </div>
       ) : (

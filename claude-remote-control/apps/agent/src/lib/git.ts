@@ -749,3 +749,112 @@ export async function getRepoStatus(repoPath: string): Promise<{
     ignoredCount: parsed.ignoredCount,
   };
 }
+
+// ============================================================================
+// Git write actions (Epic 6 — Story 6.4)
+// ============================================================================
+
+/**
+ * Stage files by pathspecs. Pass `['.']` to stage all changes.
+ */
+export async function stagePaths(repoPath: string, pathspecs: string[]): Promise<void> {
+  const result = await runGit(['-C', repoPath, 'add', '--', ...pathspecs]);
+  if (result.code !== 0) {
+    throw new Error('stage failed');
+  }
+}
+
+/**
+ * Unstage files by pathspecs. Pass `['.']` to unstage all changes.
+ */
+export async function unstagePaths(repoPath: string, pathspecs: string[]): Promise<void> {
+  const result = await runGit(['-C', repoPath, 'restore', '--staged', '--', ...pathspecs]);
+  if (result.code !== 0) {
+    throw new Error('unstage failed');
+  }
+}
+
+/**
+ * Commit staged changes with a message.
+ * Classifies stderr into actionable errors.
+ */
+export async function commit(repoPath: string, message: string): Promise<void> {
+  const result = await runGit(['-C', repoPath, 'commit', '-m', message]);
+  if (result.code !== 0) {
+    const stderr = result.stderr;
+    if (/nothing to commit|no changes added/.test(stderr)) {
+      throw new Error('no staged changes to commit');
+    }
+    if (/Please tell me who you are|user\.name|empty ident/.test(stderr)) {
+      throw new Error('set git user.name/user.email on the host');
+    }
+    throw new Error('commit failed');
+  }
+}
+
+/**
+ * Push to tracked upstream. Uses network mode to prevent hanging on auth prompts.
+ */
+export async function push(repoPath: string): Promise<void> {
+  const result = await runGit(['-C', repoPath, 'push'], { network: true });
+  if (result.code !== 0) {
+    const stderr = result.stderr;
+    if (/no upstream|has no upstream branch/.test(stderr)) {
+      throw new Error('no upstream configured for this branch');
+    }
+    if (/Authentication failed|could not read Username|Permission denied|Host key verification failed|terminal prompts disabled/.test(stderr)) {
+      throw new Error('authentication required — configure a credential helper on the host');
+    }
+    if (/non-fast-forward|tip of your current branch is behind|fetch first/.test(stderr)) {
+      throw new Error('push rejected (non-fast-forward) — pull first');
+    }
+    throw new Error('push failed');
+  }
+}
+
+/**
+ * Pull from tracked upstream. Uses network mode to prevent hanging on auth prompts.
+ */
+export async function pull(repoPath: string): Promise<void> {
+  const result = await runGit(['-C', repoPath, 'pull'], { network: true });
+  if (result.code !== 0) {
+    const stderr = result.stderr;
+    if (/no upstream|has no upstream branch/.test(stderr)) {
+      throw new Error('no upstream configured for this branch');
+    }
+    if (/Authentication failed|could not read Username|Permission denied|Host key verification failed|terminal prompts disabled/.test(stderr)) {
+      throw new Error('authentication required — configure a credential helper on the host');
+    }
+    const combined = result.stdout + result.stderr;
+    if (/CONFLICT|conflict|would be overwritten/.test(combined)) {
+      throw new Error('pull produced conflicts — resolve on the host');
+    }
+    throw new Error('pull failed');
+  }
+}
+
+/**
+ * Create or switch to a branch. Validates branch name with validateSafeRef.
+ */
+export async function branch(repoPath: string, name: string, create: boolean): Promise<void> {
+  const validation = validateSafeRef(name);
+  if (!validation.valid) {
+    throw new Error(validation.reason);
+  }
+
+  const args = create
+    ? ['-C', repoPath, 'switch', '-c', name]
+    : ['-C', repoPath, 'switch', name];
+
+  const result = await runGit(args);
+  if (result.code !== 0) {
+    const stderr = result.stderr;
+    if (/would be overwritten|dirty working tree|uncommitted changes/.test(stderr)) {
+      throw new Error('uncommitted changes would be overwritten — commit or stash first');
+    }
+    if (/already exists|already checked out/.test(stderr)) {
+      throw new Error('branch already exists');
+    }
+    throw new Error('branch operation failed');
+  }
+}

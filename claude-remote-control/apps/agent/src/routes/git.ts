@@ -5,7 +5,7 @@
 
 import { Router } from 'express';
 import { resolve, relative, isAbsolute } from 'node:path';
-import { discoverRepos, getRepoStatus, getLog, getCommit, getFileDiff, getGraph } from '../lib/git.js';
+import { discoverRepos, getRepoStatus, getLog, getCommit, getFileDiff, getGraph, stagePaths, unstagePaths, commit, push, pull, branch } from '../lib/git.js';
 import { broadcastGitStatus } from '../websocket-handlers.js';
 import { config } from '../config.js';
 
@@ -244,6 +244,182 @@ export function createGitRoutes(): Router {
     } catch (_err) {
       return res.status(500).json({ error: 'git operation failed' });
     }
+  });
+
+  // POST /api/git/stage
+  router.post('/stage', async (req, res) => {
+    const { project, repo, pathspecs, all } = req.body;
+    if (!project || !repo) {
+      return res.status(400).json({ error: 'project and repo are required' });
+    }
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
+    const specs = all ? ['.'] : (Array.isArray(pathspecs) ? pathspecs : []);
+    if (specs.length === 0) {
+      return res.status(400).json({ error: 'pathspecs are required or all must be true' });
+    }
+
+    for (const p of specs) {
+      if (typeof p !== 'string' || !isFilePathAllowed(repo, p)) {
+        return res.status(400).json({ error: 'pathspec is outside the repository tree' });
+      }
+    }
+
+    try {
+      await stagePaths(repo, specs);
+    } catch (_err) {
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    try {
+      const status = await getRepoStatus(repo);
+      broadcastGitStatus(project, repo, status);
+    } catch (_err) { /* status refresh best-effort */ }
+    return res.json({ ok: true });
+  });
+
+  // POST /api/git/unstage
+  router.post('/unstage', async (req, res) => {
+    const { project, repo, pathspecs, all } = req.body;
+    if (!project || !repo) {
+      return res.status(400).json({ error: 'project and repo are required' });
+    }
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
+    const specs = all ? ['.'] : (Array.isArray(pathspecs) ? pathspecs : []);
+    if (specs.length === 0) {
+      return res.status(400).json({ error: 'pathspecs are required or all must be true' });
+    }
+
+    for (const p of specs) {
+      if (typeof p !== 'string' || !isFilePathAllowed(repo, p)) {
+        return res.status(400).json({ error: 'pathspec is outside the repository tree' });
+      }
+    }
+
+    try {
+      await unstagePaths(repo, specs);
+    } catch (_err) {
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    try {
+      const status = await getRepoStatus(repo);
+      broadcastGitStatus(project, repo, status);
+    } catch (_err) { /* status refresh best-effort */ }
+    return res.json({ ok: true });
+  });
+
+  // POST /api/git/commit
+  router.post('/commit', async (req, res) => {
+    const { project, repo, message: commitMsg } = req.body;
+    if (!project || !repo) {
+      return res.status(400).json({ error: 'project and repo are required' });
+    }
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+    if (!commitMsg || typeof commitMsg !== 'string' || !commitMsg.trim()) {
+      return res.status(400).json({ error: 'commit message is required' });
+    }
+
+    try {
+      await commit(repo, commitMsg.trim());
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('no staged changes') || errMsg.includes('set git user.name')) {
+        return res.status(400).json({ error: errMsg });
+      }
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    try {
+      const status = await getRepoStatus(repo);
+      broadcastGitStatus(project, repo, status);
+    } catch (_err) { /* status refresh best-effort */ }
+    return res.json({ ok: true });
+  });
+
+  // POST /api/git/push
+  router.post('/push', async (req, res) => {
+    const { project, repo } = req.body;
+    if (!project || !repo) {
+      return res.status(400).json({ error: 'project and repo are required' });
+    }
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
+    try {
+      await push(repo);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('no upstream') || errMsg.includes('authentication') || errMsg.includes('non-fast-forward')) {
+        return res.status(400).json({ error: errMsg });
+      }
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    try {
+      const status = await getRepoStatus(repo);
+      broadcastGitStatus(project, repo, status);
+    } catch (_err) { /* status refresh best-effort */ }
+    return res.json({ ok: true });
+  });
+
+  // POST /api/git/pull
+  router.post('/pull', async (req, res) => {
+    const { project, repo } = req.body;
+    if (!project || !repo) {
+      return res.status(400).json({ error: 'project and repo are required' });
+    }
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
+    try {
+      await pull(repo);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('no upstream') || errMsg.includes('authentication') || errMsg.includes('conflicts')) {
+        return res.status(400).json({ error: errMsg });
+      }
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    try {
+      const status = await getRepoStatus(repo);
+      broadcastGitStatus(project, repo, status);
+    } catch (_err) { /* status refresh best-effort */ }
+    return res.json({ ok: true });
+  });
+
+  // POST /api/git/branch
+  router.post('/branch', async (req, res) => {
+    const { project, repo, name, create } = req.body;
+    if (!project || !repo) {
+      return res.status(400).json({ error: 'project and repo are required' });
+    }
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'branch name is required' });
+    }
+
+    try {
+      await branch(repo, name, Boolean(create));
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('uncommitted changes') || errMsg.includes('already exists') || errMsg.includes('injection') || errMsg.includes('whitespace')) {
+        return res.status(400).json({ error: errMsg });
+      }
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    try {
+      const status = await getRepoStatus(repo);
+      broadcastGitStatus(project, repo, status);
+    } catch (_err) { /* status refresh best-effort */ }
+    return res.json({ ok: true });
   });
 
   return router;
