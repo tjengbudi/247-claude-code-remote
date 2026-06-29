@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.46.0] - 2026-06-29
+
+### Features
+
+- **git**: Story 6.3 — git history list + DAG graph toggle + lazy commit diff (27f2150)
+- **git**: Story 6.2 — per-project multi-repo discovery and live status (41f7222)
+- **git**: Story 6.1 — git contract in 247-shared + safe executor (ab620f8)
+
+### Bug Fixes
+
+- **git**: Story 6.3 code-review hardening — contain repo/path, cap getLog, fix repo-switch state (d7f212b)
+- **web**: theme-color task allocation dropdown options (b723bd9)
+
 ## [2.45.0] - 2026-06-26
 
 ### Features
