@@ -136,7 +136,9 @@ export type WSSessionsMessageFromAgent =
   | { type: 'tasks-list'; tasks: WSTaskInfo[] }
   | { type: 'task-created'; task: WSTaskInfo }
   | { type: 'task-updated'; task: WSTaskInfo }
-  | { type: 'task-removed'; taskId: string };
+  | { type: 'task-removed'; taskId: string }
+  // Git status channel (Story 6.2 — pushed after write actions / on-demand refresh)
+  | { type: 'git-status'; project: string; repoPath: string; status: GitRepoStatus };
 
 // API types
 export interface RegisterMachineRequest {

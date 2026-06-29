@@ -15,7 +15,7 @@ import { openAgentWebSocket } from '@/lib/ws-token';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { wsLogger, pollingLogger, archivedLogger } from '@/lib/logger';
 import { useAuth } from '@/lib/auth/client';
-import type { WSSessionsMessageFromAgent, WSTaskInfo } from '247-shared';
+import type { WSSessionsMessageFromAgent, WSTaskInfo, GitRepoStatus } from '247-shared';
 
 /**
  * Build the per-user view-isolation query string (`owner`/`isOwner`) the agent
@@ -75,6 +75,8 @@ interface SessionPollingContextValue {
   getTasksForProject: (machineId: string, project: string) => WSTaskInfo[];
   /** Re-fetch tasks for a machine over REST (fallback / on-demand refresh). */
   refreshTasks: (machineId: string) => Promise<void>;
+  /** Git status map for a machine+project: repoPath → GitRepoStatus. */
+  getGitStatusForProject: (machineId: string, project: string) => Map<string, GitRepoStatus>;
 }
 
 const SessionPollingContext = createContext<SessionPollingContextValue | null>(null);
@@ -121,6 +123,10 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
   // Per-machine task lists (per-project todo items), kept in sync via the
   // /sessions WS channel (tasks-list / task-created / task-updated / task-removed).
   const [tasksByMachine, setTasksByMachine] = useState<Map<string, WSTaskInfo[]>>(new Map());
+  // Per-machine git status (project → repoPath → GitRepoStatus), pushed via git-status WS messages.
+  const [gitStatusByMachine, setGitStatusByMachine] = useState<
+    Map<string, Map<string, Map<string, GitRepoStatus>>>
+  >(new Map());
 
   const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map());
   const wsConnectedRef = useRef<Set<string>>(new Set()); // Track connected machines via ref for polling
@@ -289,6 +295,22 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
       return next;
     });
   }, []);
+
+  // Upsert git status for a repo (from git-status WS message).
+  const upsertGitStatus = useCallback(
+    (machineId: string, project: string, repoPath: string, status: GitRepoStatus) => {
+      setGitStatusByMachine((prev) => {
+        const next = new Map(prev);
+        const machineMap = new Map(next.get(machineId) ?? new Map());
+        const projectMap = new Map(machineMap.get(project) ?? new Map());
+        projectMap.set(repoPath, status);
+        machineMap.set(project, projectMap);
+        next.set(machineId, machineMap);
+        return next;
+      });
+    },
+    []
+  );
 
   // Archive a session (move from active to archived)
   const archiveSession = useCallback(
@@ -510,6 +532,11 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
                   }
                   return next;
                 });
+                break;
+
+              case 'git-status':
+                wsLogger.debug(`Git status: ${msg.project}/${msg.repoPath}`);
+                upsertGitStatus(machine.id, msg.project, msg.repoPath, msg.status);
                 break;
             }
           } catch (err) {
@@ -783,6 +810,13 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
     [tasksByMachine]
   );
 
+  // Get git status for a single project on a machine.
+  const getGitStatusForProject = useCallback(
+    (machineId: string, project: string) =>
+      gitStatusByMachine.get(machineId)?.get(project) ?? new Map(),
+    [gitStatusByMachine]
+  );
+
   const value: SessionPollingContextValue = {
     sessionsByMachine,
     machines,
@@ -799,6 +833,7 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
     getTasksForMachine,
     getTasksForProject,
     refreshTasks,
+    getGitStatusForProject,
   };
 
   return <SessionPollingContext.Provider value={value}>{children}</SessionPollingContext.Provider>;

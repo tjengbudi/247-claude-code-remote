@@ -153,6 +153,35 @@ export function broadcastTaskRemoved(taskId: string, ownerId: string | null): vo
 }
 
 /**
+ * Broadcast git status update for a specific repo.
+ * Called after write actions (Story 6.4) or on-demand refresh.
+ * Sends to all subscribers (ownerId null = no filter) since git status
+ * is not user-scoped like tasks/sessions.
+ */
+export function broadcastGitStatus(
+  project: string,
+  repoPath: string,
+  status: import('247-shared').GitRepoStatus,
+  ownerId?: string | null
+): void {
+  const message: WSSessionsMessageFromAgent = {
+    type: 'git-status',
+    project,
+    repoPath,
+    status,
+  };
+  // Git status is project-scoped, not session-scoped, so we broadcast to all
+  // subscribers (or filter by ownerId if provided for future view isolation).
+  const payload = JSON.stringify(message);
+  for (const [ws, _viewer] of sessionsSubscribers) {
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    if (!ownerId || _viewer.ownerId === ownerId || _viewer.isOwner) {
+      ws.send(payload);
+    }
+  }
+}
+
+/**
  * Handle terminal WebSocket connections
  */
 export function handleTerminalConnection(ws: WebSocket, url: URL): void {

@@ -388,51 +388,65 @@ describe('parseStatusPorcelain', () => {
     expect(result.branch.head).toBeNull();
   });
 
-  it('parses ordinary staged file (prefix 1)', () => {
+  it('parses ordinary staged file (prefix 1) with flags', () => {
     // '1 M  . 0 0 0 0 src/index.ts' — XY at positions 2-3 = 'M ' (M=staged, space=worktree clean)
     // Real porcelain v2: space in XY means "unmodified"; dot is NOT a valid XY char
     const stdout = '1 M  . 0 0 0 0 src/index.ts' + NUL;
     const result = parseStatusPorcelain(stdout);
     expect(result.files).toHaveLength(1);
     expect(result.files[0].path).toBe('src/index.ts');
+    expect(result.files[0].flags).toEqual({ index: 'M', worktree: ' ' });
     expect(result.files[0].staged).toBe(true);
     expect(result.files[0].indexStatus).toBe('modified');
     expect(result.files[0].worktreeStatus).toBeNull();
   });
 
-  it('parses ordinary unstaged file', () => {
+  it('parses ordinary unstaged file with flags', () => {
     // '1  M . 0 0 0 0 README.md' — XY = ' M' (space=index clean, M=worktree modified)
     const stdout = '1  M . 0 0 0 0 README.md' + NUL;
     const result = parseStatusPorcelain(stdout);
     expect(result.files).toHaveLength(1);
     expect(result.files[0].path).toBe('README.md');
+    expect(result.files[0].flags).toEqual({ index: ' ', worktree: 'M' });
     expect(result.files[0].staged).toBe(false);
     expect(result.files[0].indexStatus).toBeNull();
     expect(result.files[0].worktreeStatus).toBe('modified');
   });
 
-  it('parses rename record (prefix 2) with origPath from next NUL field', () => {
+  it('parses rename record (prefix 2) with origPath and flags', () => {
     // '2 R  . 0 0 0 0 R100 new.ts\0old.ts\0' — XY='R ', origPath from next NUL field
     const stdout = '2 R  . 0 0 0 0 R100 new.ts' + NUL + 'old.ts' + NUL;
     const result = parseStatusPorcelain(stdout);
     expect(result.files).toHaveLength(1);
     expect(result.files[0].path).toBe('new.ts');
     expect(result.files[0].origPath).toBe('old.ts');
+    expect(result.files[0].flags).toEqual({ index: 'R', worktree: ' ' });
     expect(result.files[0].staged).toBe(true);
     expect(result.files[0].indexStatus).toBe('renamed');
   });
 
-  it('counts untracked files (? prefix) in untrackedCount', () => {
+  it('includes untracked files (? prefix) in files array with flags', () => {
     const stdout = '? temp.log' + NUL + '? another.tmp' + NUL;
     const result = parseStatusPorcelain(stdout);
-    expect(result.files).toHaveLength(0);
+    expect(result.files).toHaveLength(2);
+    expect(result.files[0].path).toBe('temp.log');
+    expect(result.files[0].flags).toEqual({ index: '?', worktree: '?' });
+    expect(result.files[0].indexStatus).toBe('untracked');
+    expect(result.files[0].worktreeStatus).toBe('untracked');
+    expect(result.files[0].staged).toBe(false);
+    expect(result.files[1].path).toBe('another.tmp');
     expect(result.untrackedCount).toBe(2);
   });
 
-  it('counts ignored files (! prefix) in ignoredCount', () => {
+  it('includes ignored files (! prefix) in files array with flags', () => {
     const stdout = '! node_modules/' + NUL;
     const result = parseStatusPorcelain(stdout);
-    expect(result.files).toHaveLength(0);
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0].path).toBe('node_modules/');
+    expect(result.files[0].flags).toEqual({ index: '!', worktree: '!' });
+    expect(result.files[0].indexStatus).toBe('ignored');
+    expect(result.files[0].worktreeStatus).toBe('ignored');
+    expect(result.files[0].staged).toBe(false);
     expect(result.ignoredCount).toBe(1);
   });
 
@@ -442,9 +456,10 @@ describe('parseStatusPorcelain', () => {
     const result = parseStatusPorcelain(stdout);
     expect(result.files).toHaveLength(1);
     expect(result.files[0].path).toBe('conflict.ts');
-    // UU: xy='UU', xy[0]='U'≠' ' → staged=true (index has unmerged change)
-    expect(result.files[0].staged).toBe(true);
+    // u-prefix records: always unmerged regardless of XY combo; staged=false (conflicts aren't staged)
+    expect(result.files[0].staged).toBe(false);
     expect(result.files[0].indexStatus).toBe('unmerged');
+    expect(result.files[0].worktreeStatus).toBe('unmerged');
   });
 
   it('handles path without spaces', () => {
@@ -780,5 +795,208 @@ describe('parseShowNumstat', () => {
     expect(result.files[0].path).toBe('src/a.ts');
     expect(result.files[1].path).toBe('src/b.ts');
     expect(result.files[1].deletions).toBe(10);
+  });
+});
+
+// ============================================================================
+// 6. getRepoStatus — Story 6.2
+//
+// Tests that getRepoStatus calls runGit with correct args and maps the
+// parseStatusPorcelain output to GitRepoStatus shape with counts.
+// ============================================================================
+
+describe('getRepoStatus', () => {
+  let getRepoStatus: typeof import('../../src/lib/git.js').getRepoStatus;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const childProcess = await import('node:child_process');
+    spawnMock = vi.mocked(childProcess.spawn);
+    spawnMock.mockReset();
+
+    const gitModule = await import('../../src/lib/git.js');
+    getRepoStatus = gitModule.getRepoStatus;
+  });
+
+  it('calls runGit with correct porcelain v2 args and returns mapped status', async () => {
+    const stdout =
+      '# branch.head main' + NUL +
+      '# branch.upstream origin/main' + NUL +
+      '# branch.ab +2 -1' + NUL +
+      '1 M  . 0 0 0 0 src/a.ts' + NUL +
+      '1  M . 0 0 0 0 src/b.ts' + NUL +
+      '? untracked.txt' + NUL;
+
+    spawnMock.mockReturnValue(createMockProc(0, stdout, ''));
+
+    const result = await getRepoStatus('/path/to/repo');
+
+    expect(spawnMock).toHaveBeenCalledOnce();
+    const [, args] = spawnMock.mock.calls[0];
+    expect(args).toEqual(['-C', '/path/to/repo', 'status', '--porcelain=v2', '--branch', '-z']);
+
+    expect(result.branch.head).toBe('main');
+    expect(result.branch.upstream).toBe('origin/main');
+    expect(result.branch.ahead).toBe(2);
+    expect(result.branch.behind).toBe(1);
+    expect(result.files).toHaveLength(3);
+    expect(result.stagedCount).toBe(1);
+    expect(result.unstagedCount).toBe(1);
+    expect(result.untrackedCount).toBe(1);
+    expect(result.conflicted).toBe(0);
+  });
+
+  it('throws on non-zero exit code', async () => {
+    spawnMock.mockReturnValue(createMockProc(128, '', 'fatal: not a git repository'));
+    await expect(getRepoStatus('/not/a/repo')).rejects.toThrow('git status failed');
+  });
+
+  it('computes correct counts for mixed status', async () => {
+    const stdout =
+      '# branch.head feature' + NUL +
+      '1 A  . 0 0 0 0 new-file.ts' + NUL +
+      '1 M  . 0 0 0 0 modified.ts' + NUL +
+      'u UU . 0 0 0 0 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 conflict.ts' + NUL +
+      '? untracked.log' + NUL;
+
+    spawnMock.mockReturnValue(createMockProc(0, stdout, ''));
+    const result = await getRepoStatus('/repo');
+
+    expect(result.stagedCount).toBe(2); // A and M staged; UU is unmerged (staged=false)
+    expect(result.conflicted).toBe(1);
+    expect(result.untrackedCount).toBe(1);
+  });
+
+  it('returns zero counts for clean working tree', async () => {
+    const stdout = '# branch.head main' + NUL;
+    spawnMock.mockReturnValue(createMockProc(0, stdout, ''));
+    const result = await getRepoStatus('/clean-repo');
+
+    expect(result.files).toHaveLength(0);
+    expect(result.stagedCount).toBe(0);
+    expect(result.unstagedCount).toBe(0);
+    expect(result.untrackedCount).toBe(0);
+    expect(result.conflicted).toBe(0);
+    expect(result.ignoredCount).toBe(0);
+  });
+});
+
+// ============================================================================
+// 7. discoverRepos — Story 6.2
+//
+// Tests multi-repo discovery: root repo + nested repo both surfaced,
+// dedup (same path not added twice), worktree detection.
+// ============================================================================
+
+vi.mock('node:fs/promises', () => {
+  const readdirMock = vi.fn();
+  const statMock = vi.fn();
+  const readFileMock = vi.fn();
+  const accessMock = vi.fn();
+  return {
+    readdir: readdirMock,
+    stat: statMock,
+    readFile: readFileMock,
+    access: accessMock,
+    constants: { F_OK: 0 },
+  };
+});
+
+describe('discoverRepos', () => {
+  let discoverRepos: typeof import('../../src/lib/git.js').discoverRepos;
+  let readdirMock: ReturnType<typeof vi.fn>;
+  let statMock: ReturnType<typeof vi.fn>;
+  let accessMock: ReturnType<typeof vi.fn>;
+  let readFileMock: ReturnType<typeof vi.fn>;
+
+  function makeDirStat() {
+    return { isDirectory: () => true, isFile: () => false };
+  }
+  // .git directory (not a worktree file)
+  function makeGitDirStat() {
+    return { isDirectory: () => true, isFile: () => false };
+  }
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const fs = await import('node:fs/promises');
+    readdirMock = vi.mocked(fs.readdir as unknown as ReturnType<typeof vi.fn>);
+    statMock = vi.mocked(fs.stat as unknown as ReturnType<typeof vi.fn>);
+    accessMock = vi.mocked(fs.access as unknown as ReturnType<typeof vi.fn>);
+    readFileMock = vi.mocked(fs.readFile as unknown as ReturnType<typeof vi.fn>);
+    readdirMock.mockReset();
+    statMock.mockReset();
+    accessMock.mockReset();
+    readFileMock.mockReset();
+    const gitModule = await import('../../src/lib/git.js');
+    discoverRepos = gitModule.discoverRepos;
+  });
+
+  it('finds multiple repos discovered under the scan root', async () => {
+    // discoverRepos scans ENTRIES of cwd, not cwd itself.
+    // Layout: cwd=/workspace, entries: repo-a (has .git), sub/ (dir), sub/repo-b (has .git)
+    readdirMock.mockImplementation((dir: string) => {
+      if (dir === '/workspace') return Promise.resolve(['repo-a', 'sub']);
+      if (dir === '/workspace/sub') return Promise.resolve(['repo-b']);
+      return Promise.resolve([]);
+    });
+    statMock.mockImplementation((p: string) => {
+      if (p.endsWith('/.git')) return Promise.resolve(makeGitDirStat());
+      return Promise.resolve(makeDirStat());
+    });
+    accessMock.mockImplementation((p: string) => {
+      if (p === '/workspace/repo-a/.git' || p === '/workspace/sub/repo-b/.git') return Promise.resolve(undefined);
+      return Promise.reject(new Error('ENOENT'));
+    });
+
+    const result = await discoverRepos({ cwd: '/workspace' });
+    const paths = result.repos.map(r => r.path).sort();
+    expect(paths).toContain('/workspace/repo-a');
+    expect(paths).toContain('/workspace/sub/repo-b');
+    expect(paths).toHaveLength(2);
+    expect(result.capped).toBe(false);
+  });
+
+  it('does not duplicate the same repo path when found multiple times', async () => {
+    // Only one repo in scan root
+    readdirMock.mockImplementation((dir: string) => {
+      if (dir === '/workspace') return Promise.resolve(['my-repo']);
+      return Promise.resolve([]);
+    });
+    statMock.mockResolvedValue(makeGitDirStat());
+    accessMock.mockImplementation((p: string) => {
+      if (p === '/workspace/my-repo/.git') return Promise.resolve(undefined);
+      return Promise.reject(new Error('ENOENT'));
+    });
+
+    const result = await discoverRepos({ cwd: '/workspace' });
+    expect(result.repos).toHaveLength(1);
+    expect(result.repos[0].path).toBe('/workspace/my-repo');
+  });
+
+  it('returns empty when no repos found', async () => {
+    readdirMock.mockResolvedValue([]);
+    accessMock.mockRejectedValue(new Error('ENOENT'));
+    const result = await discoverRepos({ cwd: '/empty' });
+    expect(result.repos).toHaveLength(0);
+    expect(result.capped).toBe(false);
+  });
+
+  it('caps results at maxRepos and sets capped=true', async () => {
+    // cwd has 3 repo entries; maxRepos=2 should cap
+    readdirMock.mockImplementation((dir: string) => {
+      if (dir === '/workspace') return Promise.resolve(['repo-a', 'repo-b', 'repo-c']);
+      return Promise.resolve([]);
+    });
+    statMock.mockResolvedValue(makeGitDirStat());
+    accessMock.mockImplementation((p: string) => {
+      if (p.endsWith('/.git')) return Promise.resolve(undefined);
+      return Promise.reject(new Error('ENOENT'));
+    });
+
+    const result = await discoverRepos({ cwd: '/workspace', maxRepos: 2 });
+    expect(result.repos.length).toBeLessThanOrEqual(2);
+    expect(result.capped).toBe(true);
   });
 });

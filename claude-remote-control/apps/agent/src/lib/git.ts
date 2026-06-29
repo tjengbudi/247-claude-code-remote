@@ -226,12 +226,26 @@ export async function discoverRepos(
  */
 export function parseStatusPorcelain(stdout: string): {
   branch: { head: string | null; upstream: string | null; ahead: number; behind: number; branchName: string | null };
-  files: Array<{ path: string; indexStatus: string | null; worktreeStatus: string | null; staged: boolean; origPath?: string }>;
+  files: Array<{
+    path: string;
+    flags: { index: 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' '; worktree: 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' ' };
+    indexStatus: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null;
+    worktreeStatus: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null;
+    staged: boolean;
+    origPath?: string;
+  }>;
   untrackedCount: number;
   ignoredCount: number;
 } {
   const records = stdout.split('\0').filter(Boolean);
-  const files: Array<{ path: string; indexStatus: string | null; worktreeStatus: string | null; staged: boolean; origPath?: string }> = [];
+  const files: Array<{
+    path: string;
+    flags: { index: 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' '; worktree: 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' ' };
+    indexStatus: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null;
+    worktreeStatus: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null;
+    staged: boolean;
+    origPath?: string;
+  }> = [];
   let branchHead: string | null = null;
   let branchUpstream: string | null = null;
   let branchAhead = 0;
@@ -260,9 +274,31 @@ export function parseStatusPorcelain(stdout: string): {
       continue;
     }
 
-    // Untracked / ignored
-    if (record.startsWith('? ')) { untrackedCount++; continue; }
-    if (record.startsWith('! ')) { ignoredCount++; continue; }
+    // Untracked / ignored — include as distinct GitFileInfo entries
+    if (record.startsWith('? ')) {
+      const filePath = record.substring(2);
+      untrackedCount++;
+      files.push({
+        path: filePath,
+        flags: { index: '?', worktree: '?' },
+        indexStatus: 'untracked',
+        worktreeStatus: 'untracked',
+        staged: false,
+      });
+      continue;
+    }
+    if (record.startsWith('! ')) {
+      const filePath = record.substring(2);
+      ignoredCount++;
+      files.push({
+        path: filePath,
+        flags: { index: '!', worktree: '!' },
+        indexStatus: 'ignored',
+        worktreeStatus: 'ignored',
+        staged: false,
+      });
+      continue;
+    }
 
     // Data records: '1 XY ...', '2 XY ...', 'u XY ...'
     if (/^[12u]/.test(record)) {
@@ -275,21 +311,36 @@ export function parseStatusPorcelain(stdout: string): {
       const lastSpaceIdx = rest.lastIndexOf(' ');
       const filePath = lastSpaceIdx >= 0 ? rest.substring(lastSpaceIdx + 1) : rest;
 
+      const indexCode = xy[0] as 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' ';
+      const worktreeCode = xy[1] as 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' ';
+
       if (prefix === '2') {
         // Rename/copy: the NEXT NUL-delimited record is origPath
         const origPath = records[i + 1]?.trim() || undefined;
         files.push({
           path: filePath,
+          flags: { index: indexCode, worktree: worktreeCode },
           indexStatus: xy[0] !== ' ' ? getStatusCode(xy[0]) : null,
           worktreeStatus: xy[1] !== ' ' ? getStatusCode(xy[1]) : null,
           staged: xy[0] !== ' ',
           origPath,
         });
         i++; // skip origPath record
-      } else {
-        // Ordinary ('1') or unmerged ('u')
+      } else if (prefix === 'u') {
+        // Unmerged: XY can be AA/DD/AU/UA/DU/UD/UU — all mean conflict.
+        // getStatusCode maps only 'U'→'unmerged'; others ('A','D') would give wrong semantic.
         files.push({
           path: filePath,
+          flags: { index: indexCode, worktree: worktreeCode },
+          indexStatus: 'unmerged',
+          worktreeStatus: 'unmerged',
+          staged: false,
+        });
+      } else {
+        // Ordinary changed file ('1')
+        files.push({
+          path: filePath,
+          flags: { index: indexCode, worktree: worktreeCode },
           indexStatus: xy[0] !== ' ' ? getStatusCode(xy[0]) : null,
           worktreeStatus: xy[1] !== ' ' ? getStatusCode(xy[1]) : null,
           staged: xy[0] !== ' ',
@@ -309,7 +360,7 @@ export function parseStatusPorcelain(stdout: string): {
 /**
  * Helper: map single-character porcelain v2 status to human-readable string.
  */
-function getStatusCode(c: string): string {
+function getStatusCode(c: string): 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null {
   switch (c) {
     case 'A': return 'added';
     case 'D': return 'deleted';
@@ -319,7 +370,7 @@ function getStatusCode(c: string): string {
     case 'U': return 'unmerged';
     case '?': return 'untracked';
     case '!': return 'ignored';
-    default: return 'unknown';
+    default: return null;
   }
 }
 
@@ -452,4 +503,60 @@ export function parseShowNumstat(
   }
 
   return { commit, files };
+}
+
+/**
+ * Get complete git status for a repository, mapped to GitRepoStatus shape.
+ *
+ * Calls `git -C <repoPath> status --porcelain=v2 --branch -z` and maps output
+ * to shared GitRepoStatus type with per-file GitFileInfo entries including
+ * flags, staged/worktree status, and untracked/ignored files.
+ *
+ * @param repoPath - Absolute path to git repository
+ * @returns GitRepoStatus with branch info, file list, and counts
+ */
+export async function getRepoStatus(repoPath: string): Promise<{
+  branch: {
+    head: string | null;
+    upstream: string | null;
+    ahead: number;
+    behind: number;
+    branchName: string | null;
+  };
+  files: Array<{
+    path: string;
+    flags: { index: 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' '; worktree: 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' ' };
+    indexStatus: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null;
+    worktreeStatus: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null;
+    staged: boolean;
+    origPath?: string;
+  }>;
+  conflicted: number;
+  stagedCount: number;
+  unstagedCount: number;
+  untrackedCount: number;
+  ignoredCount: number;
+}> {
+  const result = await runGit(['-C', repoPath, 'status', '--porcelain=v2', '--branch', '-z']);
+
+  if (result.code !== 0) {
+    throw new Error(`git status failed: ${result.stderr}`);
+  }
+
+  const parsed = parseStatusPorcelain(result.stdout);
+
+  // Compute counts from file list
+  const conflicted = parsed.files.filter(f => f.indexStatus === 'unmerged' || f.worktreeStatus === 'unmerged').length;
+  const stagedCount = parsed.files.filter(f => f.staged).length;
+  const unstagedCount = parsed.files.filter(f => f.worktreeStatus && f.worktreeStatus !== 'untracked' && f.worktreeStatus !== 'ignored' && f.worktreeStatus !== 'unmerged').length;
+
+  return {
+    branch: parsed.branch,
+    files: parsed.files,
+    conflicted,
+    stagedCount,
+    unstagedCount,
+    untrackedCount: parsed.untrackedCount,
+    ignoredCount: parsed.ignoredCount,
+  };
 }

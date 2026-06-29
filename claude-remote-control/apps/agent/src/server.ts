@@ -20,6 +20,7 @@ import {
   createPairRoutes,
   createHooksRoutes,
   createTaskRoutes,
+  createGitRoutes,
 } from './routes/index.js';
 
 // WebSocket
@@ -177,6 +178,9 @@ export async function createServer() {
 
   // Mount task routes (per-project todo list)
   app.use('/api/tasks', createTaskRoutes());
+
+  // Mount git routes (per-project repository status)
+  app.use('/api/git', createGitRoutes());
 
   // Handle WebSocket upgrades
   // Token gate sits AHEAD of the empty-whitelist=allow path (websocket-handlers.ts:110)
