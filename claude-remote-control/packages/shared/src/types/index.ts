@@ -225,3 +225,138 @@ export interface AgentConfig {
     apiKey?: string;
   };
 }
+
+// ============================================================================
+// Git Contract Types (Epic 6 — Story 6.1)
+// ============================================================================
+
+/**
+ * Result from running a git command via the safe executor.
+ */
+export interface GitExecResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Status flags for file changes (git porcelain v2 XY codes).
+ */
+export interface GitFileStatusFlags {
+  index: 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' ';
+  worktree: 'A' | 'D' | 'M' | 'R' | 'C' | 'U' | '?' | '!' | ' ';
+}
+
+/**
+ * A single file's status from git status --porcelain=v2 -z.
+ */
+export interface GitFileInfo {
+  path: string;
+  flags: GitFileStatusFlags;
+  indexStatus?: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null;
+  worktreeStatus?: 'added' | 'deleted' | 'modified' | 'renamed' | 'copied' | 'unmerged' | 'untracked' | 'ignored' | null;
+  staged?: boolean;
+  /** For renames/copies (type='2'), the original path. */
+  origPath?: string;
+}
+
+/**
+ * Branch information from git status --branch.
+ */
+export interface GitBranchInfo {
+  head: string | null;         // current commit SHA (or null if detached/corrupted)
+  upstream: string | null;     // upstream branch ref (e.g., refs/remotes/origin/main)
+  ahead: number;               // commits ahead of upstream
+  behind: number;              // commits behind upstream
+  branchName: string | null;   // symbolic name or null
+}
+
+/**
+ * Full repository status from git status + --branch.
+ */
+export interface GitRepoStatus {
+  branch: GitBranchInfo;
+  files: GitFileInfo[];
+  conflicted: number;          // count of unmerged paths
+  stagedCount: number;         // count of staged (index != worktree) files
+  unstagedCount: number;       // count of unstaged changes
+  untrackedCount: number;      // count of untracked files
+  ignoredCount: number;        // count of ignored files (if requested)
+}
+
+/**
+ * Single commit info from git log / git show.
+ */
+export interface GitCommit {
+  hash: string;                // full SHA-1
+  shortHash: string;           // abbreviated SHA
+  author: string;              // author name
+  email: string;               // author email
+  timestamp: number;           // Unix timestamp (ms)
+  parents: string[];           // parent SHAs (empty for root commit)
+  subject: string;             // commit subject line
+}
+
+/**
+ * A single file diff from git show --numstat.
+ */
+export interface GitDiffFile {
+  path: string;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  origPath?: string;           // for renames/copies
+}
+
+/**
+ * Extended commit info with file diffs (from git show --numstat).
+ */
+export interface GitCommitWithDiff extends GitCommit {
+  files: GitDiffFile[];
+}
+
+/**
+ * Discovered repository info.
+ */
+export interface DiscoveredGitRepo {
+  path: string;                // absolute path to repo root
+  topLevel: boolean;           // true if this is a worktree/root repo, not a submodule
+  worktreeInfo?: {
+    mainWorktree: string;      // path to main worktree if this is an attached worktree
+    detached: boolean;         // true if detatched worktree
+  };
+}
+
+/**
+ * Input options for discoverRepos().
+ */
+export interface DiscoverReposOptions {
+  cwd?: string;                // starting directory (default process.cwd())
+  skipDirs?: string[];         // directory names to skip (e.g., ['node_modules', '.git'])
+  maxDepth?: number;           // max directory depth (-1 = unlimited)
+  maxRepos?: number;           // cap on total repos found
+}
+
+/**
+ * Output from discoverRepos().
+ */
+export interface DiscoverReposResult {
+  repos: DiscoveredGitRepo[];
+  capped: boolean;             // true if maxRepos/maxDepth limit was hit
+}
+
+/**
+ * Options for runGit() network operations.
+ */
+export interface GitRunOptions {
+  network?: boolean;           // if true, sets GIT_TERMINAL_PROMPT=0 + SSH BatchMode
+  env?: Record<string, string | undefined>; // additional env vars (merged with defaults)
+}
+
+/**
+ * Safe reference name validator input/output.
+ */
+export type SafeRefInput = string;
+export type SafeRefValid = { valid: true; normalized: string };
+export type SafeRefInvalid = { valid: false; reason: string };
+export type SafeRefResult = SafeRefValid | SafeRefInvalid;
