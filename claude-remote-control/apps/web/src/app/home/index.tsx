@@ -352,11 +352,11 @@ export function HomeContent() {
   );
 
   const handleFetchDiff = useCallback(
-    async (hash: string, filePath: string) => {
+    async (hash: string, filePath: string, signal?: AbortSignal) => {
       const machineId = taskScopeMachineIdRef.current;
       const repo = selectedGitRepoRef.current;
       if (!machineId || !repo) return null;
-      return fetchDiff(machineId, repo, hash, filePath);
+      return fetchDiff(machineId, repo, hash, filePath, signal);
     },
     [fetchDiff]
   );
@@ -383,27 +383,37 @@ export function HomeContent() {
     }
   }, [gitGraphCommits, taskScope.machineId, selectedGitRepo, handleFetchGraph]);
 
-  // Clear graph cache when selected repo changes so stale data isn't shown
+  // Refetch the log and reset all history state whenever the selected repo
+  // changes (or the panel opens). Without this, switching repos left the
+  // previous repo's commit list visible and clicking a commit fetched it
+  // against the wrong repo. This effect owns log fetching; handleOpenGit only
+  // opens the panel and auto-selects the first repo.
   useEffect(() => {
     setGitGraphCommits(null);
     setGitGraphCapped(false);
-  }, [selectedGitRepo]);
+    setGitCommits([]);
+    setGitPage(0);
+    setGitHasMore(false);
+    if (!gitOpen) return;
+    const machineId = taskScope.machineId;
+    if (machineId && selectedGitRepo) {
+      void handleFetchGitLog(machineId, selectedGitRepo);
+    }
+  }, [selectedGitRepo, gitOpen, taskScope.machineId, handleFetchGitLog]);
 
-  const handleOpenGit = useCallback(async () => {
+  const handleOpenGit = useCallback(() => {
     setGitOpen(true);
     if (taskScope.machineId && taskScope.project) {
-      // Auto-select first discovered repo from git status map
+      // Auto-select first discovered repo from git status map. The fetch is
+      // driven by the repo-change effect above, not here, so a repo switch and
+      // the initial open share one code path (no duplicate fetch).
       const gitRepos = getGitStatusForProject(taskScope.machineId, taskScope.project);
       const firstRepoPath = gitRepos.size > 0 ? Array.from(gitRepos.keys())[0] : null;
       if (firstRepoPath && !selectedGitRepo) {
         setSelectedGitRepo(firstRepoPath);
       }
-      const repoPath = selectedGitRepo ?? firstRepoPath;
-      if (repoPath) {
-        await handleFetchGitLog(taskScope.machineId, repoPath);
-      }
     }
-  }, [taskScope.machineId, taskScope.project, selectedGitRepo, getGitStatusForProject, handleFetchGitLog]);
+  }, [taskScope.machineId, taskScope.project, selectedGitRepo, getGitStatusForProject]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Callback handlers for new layout

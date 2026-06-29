@@ -280,6 +280,9 @@ export function GitPanel({
         </div>
       ) : (
         <GitHistory
+          // Remount on repo switch so selectedCommit / commitDetail / fileDiffs
+          // caches (keyed by hash:path) can never leak across repositories.
+          key={selectedRepo ?? '__none__'}
           commits={commits}
           graphCommits={graphCommits}
           graphCapped={graphCapped}

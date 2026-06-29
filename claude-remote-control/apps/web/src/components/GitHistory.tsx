@@ -14,7 +14,7 @@ interface GitHistoryProps {
   onLoadMore?: () => void;
   onToggleGraph: () => void;
   onFetchCommit: (hash: string) => Promise<GitCommitWithDiff | null>;
-  onFetchDiff: (hash: string, file: string) => Promise<string | null>;
+  onFetchDiff: (hash: string, file: string, signal?: AbortSignal) => Promise<string | null>;
 }
 
 type ViewMode = 'list' | 'graph';
@@ -78,6 +78,21 @@ function buildDagLayout(commits: GitCommit[]): CommitNode[] {
       activeLanes[col] = null;
     }
 
+    // Collapse merged branches: when several lanes point at the same parent hash
+    // (a feature branch merged back into its target), keep only the canonical
+    // lane for that hash (`colByHash`) and free the duplicates. Freeing a
+    // non-canonical lane preserves the hash→column mapping connectors rely on,
+    // while reclaiming the column for reuse. Without this, lanes are never freed
+    // and graph width grows monotonically on non-linear history. Trailing freed
+    // lanes are popped so `totalCols` stays tight.
+    for (let c = 0; c < activeLanes.length; c++) {
+      const h = activeLanes[c];
+      if (h !== null && colByHash.get(h) !== c) activeLanes[c] = null;
+    }
+    while (activeLanes.length > 0 && activeLanes[activeLanes.length - 1] === null) {
+      activeLanes.pop();
+    }
+
     const maxCol = Math.max(col, ...parentCols.map((p) => p.col), 0);
     nodes.push({ commit, col, parentCols, maxCol });
   }
@@ -105,7 +120,7 @@ const COL_W = 16;
 const R = 4;
 
 function DagRow({ node }: { node: CommitNode }) {
-  const { commit, col, parentCols, maxCol } = node;
+  const { col, parentCols, maxCol } = node;
   const totalCols = maxCol + 1;
   const svgW = totalCols * COL_W + 4;
 
@@ -229,7 +244,7 @@ export function GitHistory({
 
       setLoadingDiffs((prev) => new Set(prev).add(fileKey));
       try {
-        const diff = await onFetchDiff(commitHash, file.path);
+        const diff = await onFetchDiff(commitHash, file.path, ctrl.signal);
         if (ctrl.signal.aborted) return;
         if (diff !== null) {
           setFileDiffs((prev) => new Map(prev).set(fileKey, diff));

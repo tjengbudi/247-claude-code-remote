@@ -318,7 +318,13 @@ describe('GitHistory', () => {
 
       // Now expand the file
       fireEvent.click(screen.getByText('lib/foo.ts'));
-      await waitFor(() => expect(onFetchDiff).toHaveBeenCalledWith('a'.repeat(40), 'lib/foo.ts'));
+      await waitFor(() =>
+        expect(onFetchDiff).toHaveBeenCalledWith(
+          'a'.repeat(40),
+          'lib/foo.ts',
+          expect.any(AbortSignal)
+        )
+      );
     });
   });
 

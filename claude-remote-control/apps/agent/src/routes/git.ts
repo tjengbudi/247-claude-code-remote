@@ -4,8 +4,41 @@
  */
 
 import { Router } from 'express';
+import { resolve, relative, isAbsolute } from 'node:path';
 import { discoverRepos, getRepoStatus, getLog, getCommit, getFileDiff, getGraph } from '../lib/git.js';
 import { broadcastGitStatus } from '../websocket-handlers.js';
+import { config } from '../config.js';
+
+/**
+ * Absolute, expanded allowed root for git operations. The `repo` query param is
+ * client-controlled and flows into `git -C <repo>`, so every history route must
+ * confine it to the configured projects root — otherwise a caller can read any
+ * git repo the agent process can reach (the REST surface is not token-gated).
+ */
+function allowedRoot(): string {
+  return resolve(config.projects.basePath.replace('~', process.env.HOME || ''));
+}
+
+/**
+ * True when `target` is the allowed root or sits underneath it. Uses path
+ * relativity (not string prefix) so `~/dev-secret` cannot pass as `~/dev`.
+ */
+function isContained(root: string, target: string): boolean {
+  if (target === root) return true;
+  const rel = relative(root, target);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+/** Reject a `repo` that resolves outside the allowed projects root. */
+function isRepoAllowed(repo: string): boolean {
+  return isContained(allowedRoot(), resolve(repo));
+}
+
+/** Reject a per-file pathspec that escapes the repo tree (e.g. `../../etc/passwd`). */
+function isFilePathAllowed(repo: string, filePath: string): boolean {
+  const repoRoot = resolve(repo);
+  return isContained(repoRoot, resolve(repoRoot, filePath));
+}
 
 export function createGitRoutes(): Router {
   const router = Router();
@@ -68,6 +101,10 @@ export function createGitRoutes(): Router {
       return res.status(400).json({ error: 'repo query parameter is required' });
     }
 
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
     const limitRaw = req.query.limit;
     const limitParsed = typeof limitRaw === 'string' ? parseInt(limitRaw, 10) : NaN;
     if (typeof limitRaw === 'string' && (isNaN(limitParsed) || limitParsed < 0)) {
@@ -104,6 +141,10 @@ export function createGitRoutes(): Router {
       return res.status(400).json({ error: 'repo query parameter is required' });
     }
 
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
     const hashRaw = req.query.hash;
     const hash = typeof hashRaw === 'string' && hashRaw ? hashRaw : undefined;
 
@@ -137,6 +178,10 @@ export function createGitRoutes(): Router {
       return res.status(400).json({ error: 'repo query parameter is required' });
     }
 
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
     const hashRaw = req.query.hash;
     const hash = typeof hashRaw === 'string' && hashRaw ? hashRaw : undefined;
 
@@ -154,6 +199,10 @@ export function createGitRoutes(): Router {
 
     if (!filePath) {
       return res.status(400).json({ error: 'path query parameter is required' });
+    }
+
+    if (!isFilePathAllowed(repo, filePath)) {
+      return res.status(400).json({ error: 'path is outside the repository tree' });
     }
 
     try {
@@ -178,6 +227,10 @@ export function createGitRoutes(): Router {
       return res.status(400).json({ error: 'repo query parameter is required' });
     }
 
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
     const maxCommitsRaw = req.query.maxCommits;
     const maxCommitsParsed = typeof maxCommitsRaw === 'string' ? parseInt(maxCommitsRaw, 10) : NaN;
     if (typeof maxCommitsRaw === 'string' && (isNaN(maxCommitsParsed) || maxCommitsParsed < 1)) {
@@ -188,7 +241,7 @@ export function createGitRoutes(): Router {
     try {
       const result = await getGraph(repo, { maxCommits });
       return res.json(result);
-    } catch (err) {
+    } catch (_err) {
       return res.status(500).json({ error: 'git operation failed' });
     }
   });

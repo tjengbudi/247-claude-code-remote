@@ -1091,6 +1091,22 @@ describe('getLog', () => {
       expect.arrayContaining(['-C', '/path with spaces;rm -rf /'])
     );
   });
+
+  it('caps limit at 500 at the library level (unbounded request is clamped)', async () => {
+    spawnMock.mockClear();
+    const proc = createMockProc(0, '');
+    spawnMock.mockReturnValue(proc);
+
+    await getLog('/repo/path', { limit: 9_999_999 });
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['-n', '500']),
+      expect.anything()
+    );
+    // The unbounded value must never reach git
+    expect(spawnMock.mock.calls[0][1]).not.toContain('9999999');
+  });
 });
 
 // ============================================================================

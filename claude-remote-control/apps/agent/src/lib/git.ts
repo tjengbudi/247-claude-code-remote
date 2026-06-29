@@ -534,14 +534,17 @@ function validateCommitHash(hash: string): void {
  * and maps output to GitCommit[] with timestamp converted from seconds to milliseconds.
  *
  * @param repoPath - Absolute path to git repository
- * @param opts - Pagination options (limit defaults to 50, skip defaults to 0)
+ * @param opts - Pagination options (limit defaults to 50, capped at 500; skip defaults to 0)
  * @returns Array of GitCommit objects
  */
+export const GET_LOG_MAX_LIMIT = 500;
+
 export async function getLog(
   repoPath: string,
   opts?: { limit?: number; skip?: number }
 ): Promise<GitCommit[]> {
-  const limit = opts?.limit ?? 50;
+  // Cap at the library level so any caller (not just the route) is bounded.
+  const limit = Math.min(opts?.limit ?? 50, GET_LOG_MAX_LIMIT);
   const skip = opts?.skip ?? 0;
 
   const result = await runGit([
@@ -577,7 +580,7 @@ export async function getLog(
  * and maps output to GitCommitWithDiff with timestamp in milliseconds.
  *
  * @param repoPath - Absolute path to git repository
- * @param hash - Commit hash (full or abbreviated, 4-40 hex chars)
+ * @param hash - Commit hash (full or abbreviated, 7-40 hex chars)
  * @returns GitCommitWithDiff with commit metadata and changed files
  */
 export async function getCommit(
@@ -618,7 +621,7 @@ export async function getCommit(
  * and returns the raw unified diff text.
  *
  * @param repoPath - Absolute path to git repository
- * @param hash - Commit hash (full or abbreviated, 4-40 hex chars)
+ * @param hash - Commit hash (full or abbreviated, 7-40 hex chars)
  * @param filePath - Path to file relative to repo root
  * @returns Raw unified diff text
  */

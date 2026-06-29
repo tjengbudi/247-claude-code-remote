@@ -28,7 +28,8 @@ interface UseGitActionsReturn {
     machineId: string,
     repo: string,
     hash: string,
-    filePath: string
+    filePath: string,
+    signal?: AbortSignal
   ) => Promise<string | null>;
   fetchGraph: (
     machineId: string,
@@ -138,7 +139,8 @@ export function useGitActions(
       machineId: string,
       repo: string,
       hash: string,
-      filePath: string
+      filePath: string,
+      signal?: AbortSignal
     ): Promise<string | null> => {
       const machine = findMachine(machineId);
       if (!machine) {
@@ -153,7 +155,7 @@ export function useGitActions(
           machine.url,
           `${base}${sep}repo=${encodeURIComponent(repo)}&hash=${encodeURIComponent(hash)}&path=${encodeURIComponent(filePath)}`
         );
-        const response = await fetch(url);
+        const response = await fetch(url, { signal });
         if (!response.ok) {
           const err = await response.json().catch(() => ({ error: 'Failed to fetch diff' }));
           toast.error(err.error || 'Failed to fetch diff');
@@ -162,6 +164,8 @@ export function useGitActions(
         const data = await response.json();
         return data.diff || null;
       } catch (err) {
+        // Aborted fetches are intentional (commit/repo switch) — stay silent.
+        if (err instanceof DOMException && err.name === 'AbortError') return null;
         console.error('Failed to fetch git diff:', err);
         toast.error('Could not connect to agent');
         return null;
