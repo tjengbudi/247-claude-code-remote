@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit } from 'lucide-react';
+import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { GitRepoStatus, GitFileInfo } from '247-shared';
+import type { GitRepoStatus, GitFileInfo, GitCommit, GitCommitWithDiff } from '247-shared';
+import { GitHistory } from './GitHistory';
 
 // View type matching API response shape from /api/git/status
 export interface GitRepoView {
@@ -17,7 +18,20 @@ export interface GitRepoView {
 interface GitPanelProps {
   project: string;
   repos: GitRepoView[];
+  selectedRepo: string | null;
+  commits: GitCommit[];
+  graphCommits: GitCommit[] | null;
+  graphCapped: boolean;
+  loadingHistory: boolean;
+  graphLoading: boolean;
+  onSelectRepo: (repo: string) => void;
+  onLoadMore?: () => void;
+  onToggleGraph: () => void;
+  onFetchCommit: (hash: string) => Promise<GitCommitWithDiff | null>;
+  onFetchDiff: (hash: string, file: string) => Promise<string | null>;
 }
+
+type TabView = 'status' | 'history';
 
 // Status badge colors
 const STATUS_COLORS: Record<string, string> = {
@@ -78,7 +92,6 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
   const { branch, files } = repo.status;
   const branchName = branch.branchName || '(detached)';
 
-  // Split files into categories
   const staged = files.filter(f => f.staged && f.indexStatus);
   const changes = files.filter(f => !f.staged && f.worktreeStatus && f.worktreeStatus !== 'untracked' && f.worktreeStatus !== 'ignored');
   const untracked = files.filter(f => f.worktreeStatus === 'untracked');
@@ -88,7 +101,6 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
 
   return (
     <div className="rounded-lg border border-white/5 bg-white/[0.02]">
-      {/* Repo header */}
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.02]"
@@ -114,10 +126,8 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
         )}
       </button>
 
-      {/* Expanded content */}
       {expanded && (
         <div className="border-t border-white/5 px-3 py-2">
-          {/* Branch info */}
           <div className="mb-3 flex items-center gap-2 text-xs text-white/50">
             <GitBranch className="h-3 w-3" />
             <span className="font-medium text-white/70">{branchName}</span>
@@ -125,7 +135,6 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
             {branch.behind > 0 && <span className="text-amber-400">↓{branch.behind}</span>}
           </div>
 
-          {/* File sections */}
           {staged.length > 0 && (
             <div className="mb-3">
               <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-white/40">
@@ -168,7 +177,50 @@ function RepoGroup({ repo }: { repo: GitRepoView }) {
   );
 }
 
-export function GitPanel({ project, repos }: GitPanelProps) {
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+        active
+          ? 'bg-white/10 text-white'
+          : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+export function GitPanel({
+  project,
+  repos,
+  selectedRepo,
+  commits,
+  graphCommits,
+  graphCapped,
+  loadingHistory,
+  graphLoading,
+  onSelectRepo,
+  onLoadMore,
+  onToggleGraph,
+  onFetchCommit,
+  onFetchDiff,
+}: GitPanelProps) {
+  const [activeTab, setActiveTab] = useState<TabView>('status');
+
   if (repos.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
@@ -184,10 +236,61 @@ export function GitPanel({ project, repos }: GitPanelProps) {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-3 overflow-auto p-4">
-      {repos.map(repo => (
-        <RepoGroup key={repo.repoPath} repo={repo} />
-      ))}
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Tab bar */}
+      <div className="flex items-center gap-2 border-b border-white/5 px-4 py-2">
+        <TabButton
+          active={activeTab === 'status'}
+          onClick={() => setActiveTab('status')}
+          icon={<FolderGit className="h-3.5 w-3.5" />}
+          label="Status"
+        />
+        <TabButton
+          active={activeTab === 'history'}
+          onClick={() => setActiveTab('history')}
+          icon={<History className="h-3.5 w-3.5" />}
+          label="History"
+        />
+
+        {/* Repo selector when viewing history */}
+        {activeTab === 'history' && repos.length > 1 && (
+          <select
+            value={selectedRepo || ''}
+            onChange={(e) => onSelectRepo(e.target.value)}
+            className="ml-auto rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/70 outline-none hover:bg-white/10"
+          >
+            {repos.map((repo) => {
+              const name = repo.repoPath.split('/').pop() || repo.repoPath;
+              return (
+                <option key={repo.repoPath} value={repo.repoPath} className="bg-[#0d0d14]">
+                  {name}
+                </option>
+              );
+            })}
+          </select>
+        )}
+      </div>
+
+      {/* Tab content */}
+      {activeTab === 'status' ? (
+        <div className="flex flex-1 flex-col gap-3 overflow-auto p-4">
+          {repos.map(repo => (
+            <RepoGroup key={repo.repoPath} repo={repo} />
+          ))}
+        </div>
+      ) : (
+        <GitHistory
+          commits={commits}
+          graphCommits={graphCommits}
+          graphCapped={graphCapped}
+          loading={loadingHistory}
+          graphLoading={graphLoading}
+          onLoadMore={onLoadMore}
+          onToggleGraph={onToggleGraph}
+          onFetchCommit={onFetchCommit}
+          onFetchDiff={onFetchDiff}
+        />
+      )}
     </div>
   );
 }

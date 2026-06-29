@@ -28,6 +28,11 @@ export type {
   SafeRefResult,
 } from '247-shared';
 
+import type {
+  GitCommit,
+  GitCommitWithDiff,
+} from '247-shared';
+
 // ============================================================================
 // Safe reference validator
 // ============================================================================
@@ -503,6 +508,187 @@ export function parseShowNumstat(
   }
 
   return { commit, files };
+}
+
+// ============================================================================
+// Story 6.3: Git history functions
+// ============================================================================
+
+/**
+ * Validate a commit hash (full or abbreviated SHA-1).
+ * Minimum 7 chars to avoid ambiguous prefix collisions in large repos.
+ */
+function validateCommitHash(hash: string): void {
+  if (!hash || typeof hash !== 'string') {
+    throw new Error('Invalid hash: empty or non-string');
+  }
+  if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
+    throw new Error(`Invalid hash format: ${hash} (must be 7-40 hex characters)`);
+  }
+}
+
+/**
+ * Get paginated git log for a repository.
+ *
+ * Runs `git -C <repoPath> log --pretty=format:'%H%x00%h%x00%an%x00%ae%x00%at%x00%P%x00%s' -z -n <limit> --skip=<offset>`
+ * and maps output to GitCommit[] with timestamp converted from seconds to milliseconds.
+ *
+ * @param repoPath - Absolute path to git repository
+ * @param opts - Pagination options (limit defaults to 50, skip defaults to 0)
+ * @returns Array of GitCommit objects
+ */
+export async function getLog(
+  repoPath: string,
+  opts?: { limit?: number; skip?: number }
+): Promise<GitCommit[]> {
+  const limit = opts?.limit ?? 50;
+  const skip = opts?.skip ?? 0;
+
+  const result = await runGit([
+    '-C',
+    repoPath,
+    'log',
+    '--pretty=format:%H%x00%h%x00%an%x00%ae%x00%at%x00%P%x00%s',
+    '-z',
+    '-n',
+    String(limit),
+    '--skip',
+    String(skip),
+  ]);
+
+  if (result.code !== 0) {
+    throw new Error(`git log failed: ${result.stderr}`);
+  }
+
+  const parsed = parseLog(result.stdout);
+
+  // parseLog stores timestamp as Number(%at) = seconds; GitCommit.timestamp says "ms"
+  // Convert to milliseconds to match the type contract
+  return parsed.map((c) => ({
+    ...c,
+    timestamp: c.timestamp * 1000,
+  }));
+}
+
+/**
+ * Get commit detail with file list from git show --numstat.
+ *
+ * Validates hash format, runs `git -C <repoPath> show --numstat -z --format='...' <hash>`,
+ * and maps output to GitCommitWithDiff with timestamp in milliseconds.
+ *
+ * @param repoPath - Absolute path to git repository
+ * @param hash - Commit hash (full or abbreviated, 4-40 hex chars)
+ * @returns GitCommitWithDiff with commit metadata and changed files
+ */
+export async function getCommit(
+  repoPath: string,
+  hash: string
+): Promise<GitCommitWithDiff> {
+  validateCommitHash(hash);
+
+  const result = await runGit([
+    '-C',
+    repoPath,
+    'show',
+    '--numstat',
+    '-z',
+    '--format=%H%x00%h%x00%an%x00%ae%x00%at%x00%P%x00%s%x00',
+    hash,
+  ]);
+
+  if (result.code !== 0) {
+    throw new Error(`git show failed: ${result.stderr}`);
+  }
+
+  const parsed = parseShowNumstat(result.stdout);
+
+  // Flatten: GitCommitWithDiff extends GitCommit, adds files
+  // Convert timestamp from seconds to milliseconds
+  return {
+    ...parsed.commit,
+    timestamp: parsed.commit.timestamp * 1000,
+    files: parsed.files,
+  };
+}
+
+/**
+ * Get unified diff for a single file from a commit.
+ *
+ * Validates hash format, runs `git -C <repoPath> show <hash> -- <filePath>`,
+ * and returns the raw unified diff text.
+ *
+ * @param repoPath - Absolute path to git repository
+ * @param hash - Commit hash (full or abbreviated, 4-40 hex chars)
+ * @param filePath - Path to file relative to repo root
+ * @returns Raw unified diff text
+ */
+export async function getFileDiff(
+  repoPath: string,
+  hash: string,
+  filePath: string
+): Promise<string> {
+  validateCommitHash(hash);
+
+  const result = await runGit([
+    '-C',
+    repoPath,
+    'show',
+    hash,
+    '--',
+    filePath,
+  ]);
+
+  if (result.code !== 0) {
+    throw new Error(`git diff failed: ${result.stderr}`);
+  }
+
+  return result.stdout;
+}
+
+/**
+ * Get DAG graph data with --all --topo-order, capped to maxCommits.
+ *
+ * Returns commits array + capped flag. UI must show "showing N most-recent commits"
+ * when capped=true to avoid silent truncation.
+ *
+ * @param repoPath - Absolute path to git repository
+ * @param opts - Graph options (maxCommits defaults to 500)
+ * @returns Object with commits array and capped flag
+ */
+export async function getGraph(
+  repoPath: string,
+  opts?: { maxCommits?: number }
+): Promise<{ commits: GitCommit[]; capped: boolean }> {
+  const maxCommits = opts?.maxCommits ?? 500;
+
+  // Fetch maxCommits+1 to detect truncation without false-positive when repo
+  // has exactly maxCommits commits.
+  const result = await runGit([
+    '-C',
+    repoPath,
+    'log',
+    '--all',
+    '--topo-order',
+    '--pretty=format:%H%x00%h%x00%an%x00%ae%x00%at%x00%P%x00%s',
+    '-z',
+    '-n',
+    String(maxCommits + 1),
+  ]);
+
+  if (result.code !== 0) {
+    throw new Error(`git log failed: ${result.stderr}`);
+  }
+
+  const parsed = parseLog(result.stdout);
+  const capped = parsed.length > maxCommits;
+  const sliced = capped ? parsed.slice(0, maxCommits) : parsed;
+
+  const commits = sliced.map((c) => ({
+    ...c,
+    timestamp: c.timestamp * 1000,
+  }));
+
+  return { commits, capped };
 }
 
 /**

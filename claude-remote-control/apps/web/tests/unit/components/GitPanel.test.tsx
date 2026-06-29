@@ -15,6 +15,11 @@ vi.mock('lucide-react', () => ({
   GitBranch: () => null,
   AlertCircle: () => null,
   FolderGit: () => null,
+  History: () => null,
+  GitCommit: () => null,
+  Loader2: () => null,
+  GitCompareArrows: () => null,
+  AlertTriangle: () => null,
 }));
 
 function makeStatus(overrides: Partial<GitRepoStatus> = {}): GitRepoStatus {

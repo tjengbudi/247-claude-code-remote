@@ -60,6 +60,11 @@ function createMockProc(code: number, stdout: string, stderr = ''): MockProc {
 // NUL separator constant — the parser splits on \x00
 const NUL = '\x00';
 
+// Helper: create commit record with NUL-delimited fields + trailing NUL
+function makeCommit(fields: string[]): string {
+  return fields.join(NUL) + NUL;
+}
+
 // ============================================================================
 // 1. validateSafeRef tests
 // ============================================================================
@@ -505,9 +510,6 @@ describe('parseLog', () => {
     const gitModule = await import('../../src/lib/git.js');
     parseLog = gitModule.parseLog;
   });
-
-  // Helpers: each commit = 7 fields NUL-separated + trailing NUL terminator
-  const makeCommit = (fields: string[]) => fields.join(NUL) + NUL;
 
   it('parses a single commit record (7 NUL-delimited fields)', () => {
     const hash = 'a'.repeat(40);
@@ -998,5 +1000,330 @@ describe('discoverRepos', () => {
     const result = await discoverRepos({ cwd: '/workspace', maxRepos: 2 });
     expect(result.repos.length).toBeLessThanOrEqual(2);
     expect(result.capped).toBe(true);
+  });
+});
+
+// ============================================================================
+// 7. getLog — pagination + argv-safety
+// ============================================================================
+
+describe('getLog', () => {
+  let getLog!: typeof import('../../src/lib/git.js').getLog;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+
+    const gitModule = await import('../../src/lib/git.js');
+    getLog = gitModule.getLog;
+  });
+
+  it('passes limit and skip as discrete argv elements', async () => {
+    const hash = 'a'.repeat(40);
+    const parent = 'b'.repeat(40);
+    const stdout = makeCommit([hash, 'abc', 'Author', 'a@b.com', '1700000000', parent, 'Fix']);
+
+    const proc = createMockProc(0, stdout);
+    spawnMock.mockReturnValue(proc);
+
+    await getLog('/repo/path', { limit: 25, skip: 10 });
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['-C', '/repo/path', 'log', '-n', '25', '--skip', '10']),
+      expect.objectContaining({ shell: false })
+    );
+  });
+
+  it('defaults limit to 50 and skip to 0', async () => {
+    spawnMock.mockReset();
+    const proc = createMockProc(0, '');
+    spawnMock.mockReturnValue(proc);
+
+    await getLog('/repo/path');
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['-n', '50', '--skip', '0']),
+      expect.anything()
+    );
+  });
+
+  it('returns GitCommit[] with timestamp in milliseconds', async () => {
+    const hash = 'a'.repeat(40);
+    const parent = 'b'.repeat(40);
+    const stdout = makeCommit([hash, 'abc', 'Author', 'a@b.com', '1700000000', parent, 'Fix']);
+
+    const proc = createMockProc(0, stdout);
+    spawnMock.mockReturnValue(proc);
+
+    const commits = await getLog('/repo/path');
+
+    expect(commits).toHaveLength(1);
+    expect(commits[0].timestamp).toBe(1700000000000);
+  });
+
+  it('throws on non-zero exit', async () => {
+    const proc = createMockProc(128, '', 'fatal: not a git repository');
+    spawnMock.mockReturnValue(proc);
+
+    await expect(getLog('/not-a-repo')).rejects.toThrow('git log failed');
+  });
+
+  it('argv-safety: repo path is one argv element (no shell injection)', async () => {
+    spawnMock.mockClear();
+    const hash = 'a'.repeat(40);
+    const parent = 'b'.repeat(40);
+    const stdout = makeCommit([hash, 'abc', 'Author', 'a@b.com', '1700000000', parent, 'Fix']);
+
+    const proc = createMockProc(0, stdout);
+    spawnMock.mockReturnValue(proc);
+
+    await getLog('/path with spaces;rm -rf /', { limit: 10, skip: 0 });
+
+    const call = spawnMock.mock.calls[0];
+    expect(call[2].shell).toBe(false);
+    // Repo path is passed as -C argv element (not spawn cwd option)
+    expect(call[1]).toEqual(
+      expect.arrayContaining(['-C', '/path with spaces;rm -rf /'])
+    );
+  });
+});
+
+// ============================================================================
+// 8. getCommit — commit detail with file list
+// ============================================================================
+
+describe('getCommit', () => {
+  let getCommit!: typeof import('../../src/lib/git.js').getCommit;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+
+    const gitModule = await import('../../src/lib/git.js');
+    getCommit = gitModule.getCommit;
+  });
+
+  it('validates hash format (rejects non-hex)', async () => {
+    await expect(getCommit('/repo', 'not-a-hex-string')).rejects.toThrow(/invalid.*hash/i);
+  });
+
+  it('validates hash length (7-40 hex chars)', async () => {
+    await expect(getCommit('/repo', 'abc')).rejects.toThrow(/invalid.*hash/i);
+    await expect(getCommit('/repo', 'a'.repeat(41))).rejects.toThrow(/invalid.*hash/i);
+  });
+
+  it('accepts 7-char short hash (minimum safe length)', async () => {
+    const hash = 'a'.repeat(40);
+    const parent = 'b'.repeat(40);
+    const header = [hash, 'abc1234', 'Author', 'a@b.com', '1700000000', parent, 'Msg'].join(NUL);
+    const stdout = header + NUL + NUL;
+
+    const proc = createMockProc(0, stdout);
+    spawnMock.mockReturnValue(proc);
+
+    await getCommit('/repo', 'abc1234');
+    expect(spawnMock).toHaveBeenCalled();
+  });
+
+  it('rejects 4-6 char hash (too short, ambiguous)', async () => {
+    await expect(getCommit('/repo', 'abcd')).rejects.toThrow(/invalid.*hash/i);
+    await expect(getCommit('/repo', 'abc12')).rejects.toThrow(/invalid.*hash/i);
+    await expect(getCommit('/repo', 'abcdef')).rejects.toThrow(/invalid.*hash/i);
+  });
+
+  it('returns GitCommitWithDiff with timestamp in milliseconds', async () => {
+    const hash = 'a'.repeat(40);
+    const parent = 'b'.repeat(40);
+    const header = [hash, 'abc', 'Author', 'a@b.com', '1700000000', parent, 'Msg'].join(NUL);
+    const body = '5\t3\tsrc/index.ts' + NUL;
+    const stdout = header + NUL + NUL + body;
+
+    const proc = createMockProc(0, stdout);
+    spawnMock.mockReturnValue(proc);
+
+    const result = await getCommit('/repo', hash);
+
+    expect(result.timestamp).toBe(1700000000000);
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0].path).toBe('src/index.ts');
+  });
+
+  it('argv-safety: hash is one argv element (no injection)', async () => {
+    spawnMock.mockClear();
+    const hash = 'a'.repeat(40);
+    const parent = 'b'.repeat(40);
+    const header = [hash, 'abc', 'Author', 'a@b.com', '1700000000', parent, 'Msg'].join(NUL);
+    const body = '5\t3\tsrc/index.ts' + NUL;
+    const stdout = header + NUL + NUL + body;
+
+    const proc = createMockProc(0, stdout);
+    spawnMock.mockReturnValue(proc);
+
+    await getCommit('/repo', hash);
+
+    const call = spawnMock.mock.calls[0];
+    expect(call[2].shell).toBe(false);
+    expect(call[1]).toContain(hash);
+  });
+
+  it('throws on non-zero exit', async () => {
+    const hash = 'a'.repeat(40);
+    const proc = createMockProc(128, '', 'fatal: bad object');
+    spawnMock.mockReturnValue(proc);
+
+    await expect(getCommit('/repo', hash)).rejects.toThrow('git show failed');
+  });
+});
+
+// ============================================================================
+// 9. getFileDiff — single file unified diff
+// ============================================================================
+
+describe('getFileDiff', () => {
+  let getFileDiff!: typeof import('../../src/lib/git.js').getFileDiff;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+
+    const gitModule = await import('../../src/lib/git.js');
+    getFileDiff = gitModule.getFileDiff;
+  });
+
+  it('validates hash format', async () => {
+    await expect(getFileDiff('/repo', 'invalid', 'file.ts')).rejects.toThrow(/invalid.*hash/i);
+  });
+
+  it('argv-safety: path after -- separator (no injection)', async () => {
+    spawnMock.mockReset();
+    const hash = 'a'.repeat(40);
+    const proc = createMockProc(0, 'diff --git a/file.ts b/file.ts\n+line');
+    spawnMock.mockReturnValue(proc);
+
+    await getFileDiff('/repo', hash, 'path with spaces;evil');
+
+    const call = spawnMock.mock.calls[0];
+    expect(call[2].shell).toBe(false);
+    const argv = call[1] as string[];
+    const separatorIdx = argv.indexOf('--');
+    expect(separatorIdx).toBeGreaterThan(-1);
+    expect(argv[separatorIdx + 1]).toBe('path with spaces;evil');
+  });
+
+  it('returns raw unified diff text', async () => {
+    const hash = 'a'.repeat(40);
+    const diffText = 'diff --git a/file.ts b/file.ts\n+added line\n-removed line';
+    const proc = createMockProc(0, diffText);
+    spawnMock.mockReturnValue(proc);
+
+    const result = await getFileDiff('/repo', hash, 'file.ts');
+
+    expect(result).toBe(diffText);
+  });
+
+  it('throws on non-zero exit', async () => {
+    const hash = 'a'.repeat(40);
+    const proc = createMockProc(128, '', 'fatal: bad object');
+    spawnMock.mockReturnValue(proc);
+
+    await expect(getFileDiff('/repo', hash, 'file.ts')).rejects.toThrow('git diff failed');
+  });
+});
+
+// ============================================================================
+// 10. getGraph — DAG with --all + cap
+// ============================================================================
+
+describe('getGraph', () => {
+  let getGraph!: typeof import('../../src/lib/git.js').getGraph;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+
+    const gitModule = await import('../../src/lib/git.js');
+    getGraph = gitModule.getGraph;
+  });
+
+  it('uses --all --topo-order for multi-branch DAG', async () => {
+    const proc = createMockProc(0, '');
+    spawnMock.mockReturnValue(proc);
+
+    await getGraph('/repo', { maxCommits: 100 });
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['--all', '--topo-order']),
+      expect.anything()
+    );
+  });
+
+  it('fetches maxCommits+1 to detect cap without false-positive', async () => {
+    const proc = createMockProc(0, '');
+    spawnMock.mockReturnValue(proc);
+
+    await getGraph('/repo', { maxCommits: 500 });
+
+    // Must request 501 to distinguish "exactly 500" from "capped at 500"
+    expect(spawnMock).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['-n', '501']),
+      expect.anything()
+    );
+  });
+
+  it('returns capped:true when git returns more than maxCommits', async () => {
+    const hash1 = 'a'.repeat(40);
+    const hash2 = 'b'.repeat(40);
+    const stdout =
+      makeCommit([hash1, 'aaa', 'Author', 'a@b.com', '1700000001', '', 'First']) +
+      makeCommit([hash2, 'bbb', 'Author', 'a@b.com', '1700000000', hash1, 'Second']);
+
+    const proc = createMockProc(0, stdout);
+    spawnMock.mockReturnValue(proc);
+
+    // maxCommits=1 → fetch 2 → get 2 → capped=true, return only 1
+    const result = await getGraph('/repo', { maxCommits: 1 });
+
+    expect(result.capped).toBe(true);
+    expect(result.commits).toHaveLength(1);
+  });
+
+  it('returns capped:false when repo has exactly maxCommits commits', async () => {
+    const hash = 'a'.repeat(40);
+    const stdout = makeCommit([hash, 'abc', 'Author', 'a@b.com', '1700000000', '', 'Only commit']);
+
+    const proc = createMockProc(0, stdout);
+    spawnMock.mockReturnValue(proc);
+
+    // maxCommits=1 → fetch 2 → get 1 (repo only has 1) → capped=false
+    const result = await getGraph('/repo', { maxCommits: 1 });
+
+    expect(result.capped).toBe(false);
+    expect(result.commits).toHaveLength(1);
+  });
+
+  it('returns capped:false when result < maxCommits', async () => {
+    const proc = createMockProc(0, '');
+    spawnMock.mockReturnValue(proc);
+
+    const result = await getGraph('/repo', { maxCommits: 100 });
+
+    expect(result.capped).toBe(false);
+    expect(result.commits).toHaveLength(0);
   });
 });

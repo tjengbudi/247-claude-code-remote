@@ -40,6 +40,7 @@ export interface AppShellProps {
   onOpenNotificationSettings?: () => void;
   onOpenTokenCoverage?: () => void;
   onOpenTasks?: () => void;
+  onOpenGit?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -90,6 +91,7 @@ export function AppShell({
   onOpenNotificationSettings,
   onOpenTokenCoverage,
   onOpenTasks,
+  onOpenGit,
 }: AppShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -112,6 +114,7 @@ export function AppShell({
           onOpenNotificationSettings={onOpenNotificationSettings}
           onOpenTokenCoverage={onOpenTokenCoverage}
           onOpenTasks={onOpenTasks}
+          onOpenGit={onOpenGit}
         />
         <main className="flex flex-1 flex-col overflow-hidden">{children}</main>
       </div>

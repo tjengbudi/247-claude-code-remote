@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Zap, Loader2, ArrowDown } from 'lucide-react';
 import { SessionView } from '@/components/SessionView';
 import { NewSessionModal } from '@/components/NewSessionModal';
@@ -23,6 +23,9 @@ import { useNotificationPreferences } from '@/hooks/useNotificationPreferences';
 import { useSoundNotifications } from '@/hooks/useSoundNotifications';
 import { useSessionActions } from '@/hooks/useSessionActions';
 import { useTaskActions } from '@/hooks/useTaskActions';
+import { useGitActions } from '@/hooks/useGitActions';
+import { GitPanel } from '@/components/GitPanel';
+import type { GitCommit } from '247-shared';
 import { TaskPanel, type AllocatableSession } from '@/components/TaskPanel';
 import { useAuth } from '@/lib/auth/client';
 import { NotificationSettingsPanel } from '@/components/NotificationSettingsPanel';
@@ -125,6 +128,7 @@ export function HomeContent() {
     refreshMachine,
     setOnNeedsAttention,
     getTasksForProject,
+    getGitStatusForProject,
     refreshTasks,
   } = useSessionPolling();
 
@@ -134,6 +138,9 @@ export function HomeContent() {
     [currentUserId]
   );
   const { createTask, updateTask, deleteTask } = useTaskActions(agentConnections, taskViewer);
+
+  // Git actions hook for history operations
+  const { fetchLog, fetchCommit, fetchDiff, fetchGraph } = useGitActions(agentConnections, taskViewer);
 
   // Register sound notification callback for needs_attention status changes
   useEffect(() => {
@@ -146,6 +153,18 @@ export function HomeContent() {
     }
     return () => setOnNeedsAttention(undefined);
   }, [soundEnabled, playSound, setOnNeedsAttention]);
+
+  // Git history state
+  const [gitOpen, setGitOpen] = useState(false);
+  const [selectedGitRepo, setSelectedGitRepo] = useState<string | null>(null);
+  const [gitCommits, setGitCommits] = useState<GitCommit[]>([]);
+  const [gitGraphCommits, setGitGraphCommits] = useState<GitCommit[] | null>(null);
+  const [gitGraphCapped, setGitGraphCapped] = useState(false);
+  const [gitLoading, setGitLoading] = useState(false);
+  const [gitGraphLoading, setGitGraphLoading] = useState(false);
+  const [gitPage, setGitPage] = useState(0);
+  const [gitHasMore, setGitHasMore] = useState(false);
+  const GIT_PAGE_SIZE = 50;
 
   // Slide-over panel states
   const [guideOpen, setGuideOpen] = useState(false);
@@ -269,6 +288,122 @@ export function HomeContent() {
         : [],
     [getTasksForProject, taskScope.machineId, taskScope.project]
   );
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Git history handlers
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const handleFetchGitLog = useCallback(
+    async (machineId: string, repoPath: string) => {
+      setGitLoading(true);
+      try {
+        const commits = await fetchLog(machineId, repoPath, GIT_PAGE_SIZE, 0);
+        if (commits) {
+          setGitCommits(commits);
+          setGitPage(0);
+          setGitHasMore(commits.length >= GIT_PAGE_SIZE);
+        }
+      } finally {
+        setGitLoading(false);
+      }
+    },
+    [fetchLog]
+  );
+
+  const handleLoadMore = useCallback(
+    async (machineId: string, repoPath: string) => {
+      setGitLoading(true);
+      try {
+        const nextPage = gitPage + 1;
+        const commits = await fetchLog(machineId, repoPath, GIT_PAGE_SIZE, nextPage * GIT_PAGE_SIZE);
+        if (commits) {
+          if (commits.length > 0) {
+            setGitCommits((prev) => [...prev, ...commits]);
+            setGitPage(nextPage);
+          }
+          setGitHasMore(commits.length >= GIT_PAGE_SIZE);
+        }
+      } finally {
+        setGitLoading(false);
+      }
+    },
+    [fetchLog, gitPage]
+  );
+
+  // Use refs to avoid stale closures in commit/diff fetch callbacks
+  const selectedGitRepoRef = useRef(selectedGitRepo);
+  useEffect(() => {
+    selectedGitRepoRef.current = selectedGitRepo;
+  }, [selectedGitRepo]);
+
+  const taskScopeMachineIdRef = useRef(taskScope.machineId);
+  useEffect(() => {
+    taskScopeMachineIdRef.current = taskScope.machineId;
+  }, [taskScope.machineId]);
+
+  const handleFetchCommit = useCallback(
+    async (hash: string) => {
+      const machineId = taskScopeMachineIdRef.current;
+      const repo = selectedGitRepoRef.current;
+      if (!machineId || !repo) return null;
+      return fetchCommit(machineId, repo, hash);
+    },
+    [fetchCommit]
+  );
+
+  const handleFetchDiff = useCallback(
+    async (hash: string, filePath: string) => {
+      const machineId = taskScopeMachineIdRef.current;
+      const repo = selectedGitRepoRef.current;
+      if (!machineId || !repo) return null;
+      return fetchDiff(machineId, repo, hash, filePath);
+    },
+    [fetchDiff]
+  );
+
+  const handleFetchGraph = useCallback(
+    async (machineId: string, repoPath: string) => {
+      setGitGraphLoading(true);
+      try {
+        const result = await fetchGraph(machineId, repoPath, 500);
+        if (result) {
+          setGitGraphCommits(result.commits);
+          setGitGraphCapped(result.capped);
+        }
+      } finally {
+        setGitGraphLoading(false);
+      }
+    },
+    [fetchGraph]
+  );
+
+  const handleToggleGraph = useCallback(async () => {
+    if (gitGraphCommits === null && taskScope.machineId && selectedGitRepo) {
+      await handleFetchGraph(taskScope.machineId, selectedGitRepo);
+    }
+  }, [gitGraphCommits, taskScope.machineId, selectedGitRepo, handleFetchGraph]);
+
+  // Clear graph cache when selected repo changes so stale data isn't shown
+  useEffect(() => {
+    setGitGraphCommits(null);
+    setGitGraphCapped(false);
+  }, [selectedGitRepo]);
+
+  const handleOpenGit = useCallback(async () => {
+    setGitOpen(true);
+    if (taskScope.machineId && taskScope.project) {
+      // Auto-select first discovered repo from git status map
+      const gitRepos = getGitStatusForProject(taskScope.machineId, taskScope.project);
+      const firstRepoPath = gitRepos.size > 0 ? Array.from(gitRepos.keys())[0] : null;
+      if (firstRepoPath && !selectedGitRepo) {
+        setSelectedGitRepo(firstRepoPath);
+      }
+      const repoPath = selectedGitRepo ?? firstRepoPath;
+      if (repoPath) {
+        await handleFetchGitLog(taskScope.machineId, repoPath);
+      }
+    }
+  }, [taskScope.machineId, taskScope.project, selectedGitRepo, getGitStatusForProject, handleFetchGitLog]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Callback handlers for new layout
@@ -462,6 +597,45 @@ export function HomeContent() {
         )}
       </SlideOverPanel>
 
+      {/* Git History Slide-Over Panel */}
+      <SlideOverPanel open={gitOpen} onClose={() => setGitOpen(false)} title="Git">
+        {taskScope.project && taskScope.machineId ? (
+          (() => {
+            const scopeMachineId = taskScope.machineId!;
+            const gitRepos = getGitStatusForProject(scopeMachineId, taskScope.project!);
+            const repos = Array.from(gitRepos.entries()).map(([repoPath, status]) => ({
+              repoPath,
+              isWorktree: false,
+              status,
+            }));
+
+            return (
+              <GitPanel
+                project={taskScope.project!}
+                repos={repos}
+                selectedRepo={selectedGitRepo}
+                commits={gitCommits}
+                graphCommits={gitGraphCommits}
+                graphCapped={gitGraphCapped}
+                loadingHistory={gitLoading}
+                graphLoading={gitGraphLoading}
+                onSelectRepo={setSelectedGitRepo}
+                onLoadMore={gitHasMore && selectedGitRepo
+                  ? () => handleLoadMore(scopeMachineId, selectedGitRepo)
+                  : undefined}
+                onToggleGraph={handleToggleGraph}
+                onFetchCommit={handleFetchCommit}
+                onFetchDiff={handleFetchDiff}
+              />
+            );
+          })()
+        ) : (
+          <p className="text-sm text-white/40">
+            Open or select a project to view git status.
+          </p>
+        )}
+      </SlideOverPanel>
+
       {/* Edit Machine Modal - triggered from Sidebar */}
       {editingMachine && (
         <EditAgentModal
@@ -516,6 +690,7 @@ export function HomeContent() {
             if (taskScope.machineId) refreshTasks(taskScope.machineId);
             setTasksOpen(true);
           }}
+          onOpenGit={handleOpenGit}
         >
           {/* Main content */}
           {selectedSession ? (

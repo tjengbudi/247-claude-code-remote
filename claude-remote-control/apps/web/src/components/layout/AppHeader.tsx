@@ -15,6 +15,7 @@ import {
   Loader2,
   ShieldCheck,
   ListTodo,
+  GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { spring } from '@/lib/animations';
@@ -37,6 +38,7 @@ interface AppHeaderProps {
   onOpenNotificationSettings?: () => void;
   onOpenTokenCoverage?: () => void;
   onOpenTasks?: () => void;
+  onOpenGit?: () => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -254,6 +256,7 @@ export function AppHeader({
   onOpenNotificationSettings,
   onOpenTokenCoverage,
   onOpenTasks,
+  onOpenGit,
 }: AppHeaderProps) {
   return (
     <header
@@ -307,6 +310,13 @@ export function AppHeader({
       <div className="flex items-center gap-2">
         {!isMobile && (
           <>
+            {onOpenGit && (
+              <IconButton
+                icon={<GitBranch className="h-5 w-5" />}
+                label="Git"
+                onClick={onOpenGit}
+              />
+            )}
             {onOpenTasks && (
               <IconButton
                 icon={<ListTodo className="h-5 w-5" />}
