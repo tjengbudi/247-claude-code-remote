@@ -39,6 +39,8 @@ interface UseTerminalConnectionProps {
   token?: string;
   /** Web user id of the current viewer — tags newly-created sessions for per-user view isolation. */
   owner?: string;
+  /** Bound sub-path (worktree or subfolder) — session's cwd will be this instead of project root (Story 6.5) */
+  workingDir?: string;
 }
 
 export function useTerminalConnection({
@@ -48,6 +50,7 @@ export function useTerminalConnection({
   sessionName,
   environmentId,
   planningProjectId,
+  workingDir,
   onSessionCreated,
   onCopySuccess,
   isMobile = false,
@@ -495,6 +498,8 @@ export function useTerminalConnection({
       if (planningProjectId) wsUrl += `&planningProjectId=${encodeURIComponent(planningProjectId)}`;
       // Tag the session with its creator for per-user view isolation.
       if (owner) wsUrl += `&owner=${encodeURIComponent(owner)}`;
+      // Bind session to a worktree or subfolder (Story 6.5).
+      if (workingDir) wsUrl += `&workingDir=${encodeURIComponent(workingDir)}`;
 
       ws = openAgentWebSocket(wsUrl, token);
       wsRef.current = ws;

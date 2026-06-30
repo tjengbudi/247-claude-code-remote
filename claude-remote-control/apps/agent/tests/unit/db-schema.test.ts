@@ -21,8 +21,8 @@ describe('Database Schema', () => {
       expect(Number.isInteger(SCHEMA_VERSION)).toBe(true);
     });
 
-    it('current version is 19', () => {
-      expect(SCHEMA_VERSION).toBe(19);
+    it('current version is 20', () => {
+      expect(SCHEMA_VERSION).toBe(20);
     });
   });
 
@@ -129,6 +129,8 @@ describe('Database Schema', () => {
       expect(columnNames).toContain('last_status_change');
       // Per-user view isolation (v18)
       expect(columnNames).toContain('owner_id');
+      // Bound sub-path (v20)
+      expect(columnNames).toContain('working_dir');
 
       db.close();
     });
@@ -153,6 +155,8 @@ describe('Database Schema', () => {
           last_status_change: Date.now(),
           // Per-user view isolation (v18)
           owner_id: 'user-1',
+          // Bound working directory (v20)
+          working_dir: null,
         };
 
         expect(session.id).toBe(1);

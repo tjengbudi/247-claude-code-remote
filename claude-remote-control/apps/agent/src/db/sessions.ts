@@ -82,13 +82,13 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
       name, project, last_event,
       last_activity, created_at, updated_at,
       status, status_source, attention_reason, last_status_change,
-      owner_id
+      owner_id, working_dir
     )
     VALUES (
       @name, @project, @lastEvent,
       @lastActivity, @createdAt, @updatedAt,
       @status, @statusSource, @attentionReason, @lastStatusChange,
-      @ownerId
+      @ownerId, @workingDir
     )
     ON CONFLICT(name) DO UPDATE SET
       last_event = COALESCE(@lastEvent, last_event),
@@ -99,7 +99,10 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
       attention_reason = CASE WHEN @status IS NOT NULL THEN @attentionReason ELSE attention_reason END,
       last_status_change = COALESCE(@lastStatusChange, last_status_change),
       -- First writer wins: a later viewer must never steal ownership.
-      owner_id = COALESCE(owner_id, @ownerId)
+      owner_id = COALESCE(owner_id, @ownerId),
+      -- working_dir: COALESCE preserves stored binding when caller omits workingDir.
+      -- Use clearSessionWorkingDir() to explicitly reset to NULL.
+      working_dir = COALESCE(@workingDir, working_dir)
   `);
 
   stmt.run({
@@ -114,6 +117,7 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
     attentionReason: input.attentionReason ?? null,
     lastStatusChange,
     ownerId: input.ownerId ?? null,
+    workingDir: input.workingDir ?? null,
   });
 
   return getSession(name)!;
@@ -190,4 +194,9 @@ export function reconcileWithTmux(activeTmuxSessions: Set<string>): void {
   // Handle sessions in tmux but not in DB
   // These will be created when they receive their first connection
   // We don't create them here because we don't have project info
+}
+
+export function clearSessionWorkingDir(name: string): void {
+  const db = getDatabase();
+  db.prepare('UPDATE sessions SET working_dir = NULL WHERE name = @name').run({ name });
 }

@@ -121,6 +121,8 @@ export function useHomeState() {
           machineId: machineParam,
           sessionName: sessionParam,
           project: session.project,
+          workingDir: session.workingDir,
+          gitCwdContext: session.gitCwdContext,
         });
         hasRestoredFromUrl.current = true;
       }
@@ -169,14 +171,21 @@ export function useHomeState() {
 
   const handleSelectSession = useCallback(
     (machineId: string, sessionName: string, project: string) => {
-      setSelectedSession({ machineId, sessionName, project });
+      const sessionData = allSessions.find((s) => s.machineId === machineId && s.name === sessionName);
+      setSelectedSession({
+        machineId,
+        sessionName,
+        project,
+        workingDir: sessionData?.workingDir,
+        gitCwdContext: sessionData?.gitCwdContext,
+      });
 
       const params = new URLSearchParams(searchParams.toString());
       params.set('session', sessionName);
       params.set('machine', machineId);
       router.replace(`?${params.toString()}`, { scroll: false });
     },
-    [searchParams, router]
+    [searchParams, router, allSessions]
   );
 
   const handleStartSession = useCallback(

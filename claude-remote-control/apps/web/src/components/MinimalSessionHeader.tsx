@@ -1,7 +1,9 @@
 'use client';
 
-import { Search, Sparkles, Copy, Check, ArrowLeft, DollarSign, ClipboardPaste } from 'lucide-react';
+import { Search, Sparkles, Copy, Check, ArrowLeft, DollarSign, ClipboardPaste, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+import type { GitCwdContext } from '247-shared';
 
 interface MinimalSessionHeaderProps {
   sessionName: string;
@@ -18,6 +20,10 @@ interface MinimalSessionHeaderProps {
   // StatusLine metrics
   model?: string;
   costUsd?: number;
+  /** Bound sub-path (worktree or subfolder) — session's cwd (Story 6.5) */
+  workingDir?: string;
+  /** Classified git context for bound path — used to render worktree badge (Story 6.5) */
+  gitCwdContext?: GitCwdContext;
 }
 
 /**
@@ -38,6 +44,8 @@ export function MinimalSessionHeader({
   onToggleSearch,
   model,
   costUsd,
+  workingDir,
+  gitCwdContext,
 }: MinimalSessionHeaderProps) {
   const displayName = sessionName.split('--')[1] || sessionName;
   const isNewSession = sessionName.endsWith('--new');
@@ -51,6 +59,21 @@ export function MinimalSessionHeader({
           <span className="mr-auto flex items-center gap-1.5 text-xs text-amber-400">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
             Reconnecting...
+          </span>
+        )}
+
+        {/* Bound sub-path badge (mobile — Story 6.5) */}
+        {workingDir && (
+          <span
+            className="mr-auto flex shrink-0 items-center gap-1 rounded bg-purple-500/20 px-1.5 py-0.5 font-mono text-[10px] text-purple-300"
+            title={`Bound to: ${workingDir}`}
+          >
+            <FolderOpen className="h-3 w-3" />
+            {gitCwdContext?.kind === 'worktree' ? (
+              <span className="max-w-[80px] truncate">WT: {gitCwdContext.branch ?? 'detached'}</span>
+            ) : (
+              <span className="max-w-[80px] truncate">{workingDir.split('/').pop()}</span>
+            )}
           </span>
         )}
 
@@ -131,6 +154,21 @@ export function MinimalSessionHeader({
         <span className="truncate font-mono text-sm text-white/70">
           {isNewSession ? 'New Session' : displayName}
         </span>
+
+        {/* Bound sub-path badge (Story 6.5) */}
+        {workingDir && (
+          <span
+            className="flex shrink-0 items-center gap-1 rounded bg-purple-500/20 px-1.5 py-0.5 font-mono text-[10px] text-purple-300"
+            title={`Bound to: ${workingDir}`}
+          >
+            <FolderOpen className="h-3 w-3" />
+            {gitCwdContext?.kind === 'worktree' ? (
+              <span className="max-w-[120px] truncate">WT: {gitCwdContext.branch ?? 'detached'}</span>
+            ) : (
+              <span className="max-w-[120px] truncate">{workingDir.split('/').pop()}</span>
+            )}
+          </span>
+        )}
 
         {/* StatusLine Metrics - elegant inline display */}
         {hasMetrics && (

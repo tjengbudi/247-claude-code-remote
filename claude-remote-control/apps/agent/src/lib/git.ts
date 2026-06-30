@@ -26,11 +26,15 @@ export type {
   DiscoverReposResult,
   GitRunOptions,
   SafeRefResult,
+  GitWorktree,
+  GitCwdContext,
 } from '247-shared';
 
 import type {
   GitCommit,
   GitCommitWithDiff,
+  GitWorktree,
+  GitCwdContext,
 } from '247-shared';
 
 // ============================================================================
@@ -857,4 +861,165 @@ export async function branch(repoPath: string, name: string, create: boolean): P
     }
     throw new Error('branch operation failed');
   }
+}
+
+// ============================================================================
+// Worktree Classification (Story 6.5 — FR8 binding)
+// ============================================================================
+
+/**
+ * List all worktrees for a repository using `git worktree list --porcelain`.
+ * Porcelain format is stable: records separated by blank lines, fields by line-prefix.
+ */
+export async function listWorktrees(repoPath: string): Promise<GitWorktree[]> {
+  const result = await runGit(['-C', repoPath, 'worktree', 'list', '--porcelain']);
+  if (result.code !== 0) {
+    throw new Error(`git worktree list failed: ${result.stderr}`);
+  }
+
+  const worktrees: GitWorktree[] = [];
+  const records = result.stdout.split('\n\n').filter(Boolean);
+
+  for (const record of records) {
+    const lines = record.split('\n').filter(Boolean);
+    const info: Partial<GitWorktree> = { head: '', detached: false, bare: false };
+
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        info.path = line.slice('worktree '.length);
+      } else if (line.startsWith('HEAD ')) {
+        info.head = line.slice('HEAD '.length);
+      } else if (line.startsWith('branch ')) {
+        // branch refs/heads/<name> — extract just the name
+        const ref = line.slice('branch '.length);
+        info.branch = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref;
+      } else if (line === 'detached') {
+        info.detached = true;
+      } else if (line === 'bare') {
+        info.bare = true;
+      }
+    }
+
+    // Include all entries that have a path (bare worktrees have no HEAD line).
+    if (info.path) {
+      worktrees.push(info as GitWorktree);
+    }
+  }
+
+  return worktrees;
+}
+
+/**
+ * Classify a path as root, worktree, or subfolder.
+ *
+ * Does NOT enforce containment — that is validateWorkingDir's job.
+ * Classifies any absolute path, including sibling worktrees outside the project root.
+ *
+ * Detection strategy:
+ * - linked worktree: `<path>/.git` is a FILE (contains "gitdir: ..."), not a directory
+ * - main worktree root: `.git` is a directory AND path equals `git rev-parse --show-toplevel`
+ * - subfolder: inside a main worktree but not at its toplevel
+ * - not a git repo / error: returns kind='root' with the resolved path
+ *
+ * `boundPath` in the returned value is always null — callers set it from the session's working_dir.
+ */
+export async function classifyCwd(pathToClassify: string): Promise<GitCwdContext> {
+  const resolved = resolve(pathToClassify);
+
+  // Check if path is a git repo at all
+  const isInsideCheck = await runGit(['-C', resolved, 'rev-parse', '--is-inside-work-tree']);
+  if (isInsideCheck.code !== 0 || isInsideCheck.stdout.trim() !== 'true') {
+    return { kind: 'root', path: resolved, boundPath: null };
+  }
+
+  // Linked worktree detection: .git is a FILE, not a directory.
+  // In a linked worktree git places a .git file (not dir) containing "gitdir: <main>/.git/worktrees/<name>".
+  // In the main worktree .git is a directory.
+  const gitEntryPath = resolve(resolved, '.git');
+  let isLinkedWorktree = false;
+  try {
+    const gitEntryStat = await stat(gitEntryPath);
+    isLinkedWorktree = gitEntryStat.isFile();
+  } catch {
+    // .git entry may not exist at resolved (e.g. we're in a subdirectory); not a worktree boundary
+  }
+
+  if (isLinkedWorktree) {
+    // Linked worktree — get branch and main worktree path
+    const toplevel = await runGit(['-C', resolved, 'rev-parse', '--show-toplevel']);
+    const branchResult = await runGit(['-C', resolved, 'rev-parse', '--abbrev-ref', 'HEAD']);
+
+    return {
+      kind: 'worktree',
+      path: resolved,
+      boundPath: null,
+      mainWorktree: toplevel.code === 0 ? resolve(toplevel.stdout.trim()) : undefined,
+      branch: branchResult.code === 0 && branchResult.stdout.trim() !== 'HEAD' ? branchResult.stdout.trim() : undefined,
+    };
+  }
+
+  // Main worktree or subfolder — compare path to repo toplevel
+  const toplevel = await runGit(['-C', resolved, 'rev-parse', '--show-toplevel']);
+  if (toplevel.code === 0) {
+    const toplevelPath = resolve(toplevel.stdout.trim());
+    if (resolved === toplevelPath) {
+      return { kind: 'root', path: resolved, boundPath: null };
+    } else {
+      return { kind: 'subfolder', path: resolved, boundPath: null };
+    }
+  }
+  return { kind: 'root', path: resolved, boundPath: null };
+}
+
+/**
+ * Validate that a working_dir path is allowed for binding.
+ * Returns the resolved path if valid, or null if not allowed.
+ *
+ * Allowed paths:
+ * 1. Project root itself (working_dir = null in DB)
+ * 2. Any subfolder within the project root
+ * 3. Any registered worktree (from `git worktree list`)
+ *
+ * @param workingDir - The working_dir to validate (absolute path)
+ * @param projectRoot - The project's allowed root
+ */
+export async function validateWorkingDir(workingDir: string, projectRoot: string): Promise<{ valid: boolean; reason?: string }> {
+  const resolved = resolve(workingDir);
+  const resolvedRoot = resolve(projectRoot);
+
+  // Check containment: must be within or equal to project root, OR be a registered worktree
+  const isContained = resolved === resolvedRoot || resolved.startsWith(resolvedRoot + '/');
+
+  if (!isContained) {
+    // Check if it's a registered worktree (worktrees can be siblings, not subfolders).
+    // Run listWorktrees against the git root (not basePath which may not be a git repo).
+    try {
+      const gitRootResult = await runGit(['rev-parse', '--show-toplevel'], { cwd: resolvedRoot });
+      const repoRoot = gitRootResult.code === 0 ? resolve(gitRootResult.stdout.trim()) : resolvedRoot;
+      const worktrees = await listWorktrees(repoRoot);
+      const isRegisteredWorktree = worktrees.some((wt) => resolve(wt.path) === resolved);
+      if (isRegisteredWorktree) {
+        // Still verify the worktree directory exists — git keeps stale entries until `git worktree prune`
+        try {
+          await access(resolved, constants.R_OK);
+          return { valid: true };
+        } catch {
+          return { valid: false, reason: `Registered worktree path no longer exists: ${resolved}` };
+        }
+      }
+    } catch (err) {
+      // Fail closed — log so operational failures are visible
+      console.warn('[git] validateWorkingDir: listWorktrees failed, denying path outside root:', err instanceof Error ? err.message : String(err));
+    }
+    return { valid: false, reason: 'path is outside the project root and not a registered worktree' };
+  }
+
+  // Path is within project root — check it exists
+  try {
+    await access(resolved, constants.R_OK);
+  } catch {
+    return { valid: false, reason: 'path does not exist or is not readable' };
+  }
+
+  return { valid: true };
 }

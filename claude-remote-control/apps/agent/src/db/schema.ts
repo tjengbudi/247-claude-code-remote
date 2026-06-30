@@ -21,6 +21,10 @@ export interface DbSession {
   status_source: DbStatusSource | null;
   attention_reason: DbAttentionReason | null;
   last_status_change: number | null;
+  // Bound sub-path (v20). NULL = project root (default behavior).
+  // When set, session's tmux cwd is this absolute path instead of project root.
+  // Must be a worktree or subfolder within the project's allowed root.
+  working_dir: string | null;
   // Per-user view isolation (v18). NULL = untagged (legacy/CLI/hook-created);
   // such rows are visible only to the dashboard owner account.
   owner_id: string | null;
@@ -80,13 +84,15 @@ export interface UpsertSessionInput {
   // Per-user view isolation (v18). Set on first creation; never overwritten
   // (upsert uses COALESCE so the original creator keeps ownership).
   ownerId?: string | null;
+  // Bound sub-path (v20). NULL = project root; set when binding a worktree/subfolder.
+  workingDir?: string | null;
 }
 
 // ============================================================================
 // SQL Schema Definitions (v19 - Per-project tasks)
 // ============================================================================
 
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 export const CREATE_TABLES_SQL = `
 -- Sessions: current state of terminal sessions with status tracking
@@ -105,7 +111,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   attention_reason TEXT,
   last_status_change INTEGER,
   -- Per-user view isolation (v18); NULL = untagged (owner-only visibility)
-  owner_id TEXT
+  owner_id TEXT,
+  -- Bound sub-path (v20); NULL = project root (default behavior)
+  working_dir TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);

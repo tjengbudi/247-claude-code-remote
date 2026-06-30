@@ -81,6 +81,10 @@ export interface WSSessionInfo {
   statusSource?: StatusSource;
   attentionReason?: AttentionReason;
   lastStatusChange?: number;
+  // Bound sub-path (Story 6.5): absolute path to worktree/subfolder, or undefined for project root
+  workingDir?: string;
+  // Classified git context for the bound path (computed at list-time, never stored)
+  gitCwdContext?: GitCwdContext;
 }
 
 // ============================================================================
@@ -402,5 +406,33 @@ export interface GitBranchRequest {
   repo: string;
   name: string;
   create?: boolean;
+}
+
+// ============================================================================
+// Worktree types (Epic 6 — Story 6.5)
+// ============================================================================
+
+/** One entry from `git worktree list --porcelain`. */
+export interface GitWorktree {
+  path: string;
+  /** HEAD commit SHA; empty string for bare worktrees (which have no HEAD). */
+  head: string;
+  branch?: string;
+  detached: boolean;
+  bare: boolean;
+}
+
+/** Classification of a path's git context, computed at read time (not stored). */
+export interface GitCwdContext {
+  /** 'root' = main worktree root; 'worktree' = linked worktree; 'subfolder' = inside main tree */
+  kind: 'root' | 'worktree' | 'subfolder';
+  /** Absolute path that was classified */
+  path: string;
+  /** For 'worktree': path of the main worktree */
+  mainWorktree?: string;
+  /** For 'worktree': branch name (undefined if detached) */
+  branch?: string;
+  /** The session's bound working_dir, relative to the project root, for UI display. Null = project root. */
+  boundPath: string | null;
 }
 

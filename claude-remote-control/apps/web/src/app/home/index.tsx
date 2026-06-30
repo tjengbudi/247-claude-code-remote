@@ -717,6 +717,8 @@ export function HomeContent() {
               onSessionCreated={handleSessionCreated}
               isMobile={false}
               owner={currentUserId}
+              workingDir={selectedSession.workingDir}
+              gitCwdContext={selectedSession.gitCwdContext}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center">
@@ -816,6 +818,7 @@ export function HomeContent() {
             onSessionCreated={handleSessionCreated}
             isMobile={true}
             owner={currentUserId}
+            workingDir={selectedSession.workingDir}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center">

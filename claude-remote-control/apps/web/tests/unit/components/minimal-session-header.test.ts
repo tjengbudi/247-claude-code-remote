@@ -124,8 +124,6 @@ describe('MinimalSessionHeader', () => {
   });
 
   describe('claude status visibility', () => {
-    const claudeStatuses = ['init', 'working', 'needs_attention', 'idle'] as const;
-
     it('should hide Start Claude button when status is working', () => {
       // When claudeStatus === 'working', button should not render
       const showButton = (status: string | undefined) => status !== 'working';
@@ -135,6 +133,45 @@ describe('MinimalSessionHeader', () => {
       expect(showButton('init')).toBe(true);
       expect(showButton('needs_attention')).toBe(true);
       expect(showButton(undefined)).toBe(true);
+    });
+  });
+
+  describe('bound sub-path badge (Story 6.5)', () => {
+    // Badge renders when workingDir is set; label depends on gitCwdContext.kind.
+    // Logic mirrors MinimalSessionHeader.tsx lines 144-156.
+
+    function getBadgeLabel(workingDir: string | undefined, kind?: 'root' | 'worktree' | 'subfolder', branch?: string): string | null {
+      if (!workingDir) return null;
+      if (kind === 'worktree') return `WT: ${branch ?? 'detached'}`;
+      return workingDir.split('/').pop() ?? workingDir;
+    }
+
+    it('returns null when workingDir is undefined', () => {
+      expect(getBadgeLabel(undefined)).toBeNull();
+    });
+
+    it('returns null when workingDir is empty string', () => {
+      expect(getBadgeLabel('')).toBeNull();
+    });
+
+    it('shows WT: branch when kind=worktree with branch', () => {
+      expect(getBadgeLabel('/sibling-wt', 'worktree', 'feat/my-feature')).toBe('WT: feat/my-feature');
+    });
+
+    it('shows WT: detached when kind=worktree and branch is undefined', () => {
+      expect(getBadgeLabel('/sibling-wt', 'worktree', undefined)).toBe('WT: detached');
+    });
+
+    it('shows basename when kind=subfolder', () => {
+      expect(getBadgeLabel('/home/user/project/packages/shared', 'subfolder')).toBe('shared');
+    });
+
+    it('shows basename when kind=root (unusual but not crashing)', () => {
+      expect(getBadgeLabel('/home/user/project', 'root')).toBe('project');
+    });
+
+    it('shows basename when gitCwdContext is absent but workingDir is set', () => {
+      expect(getBadgeLabel('/home/user/project/apps/web')).toBe('web');
     });
   });
 });

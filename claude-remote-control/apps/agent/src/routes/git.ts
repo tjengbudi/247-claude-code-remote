@@ -5,7 +5,7 @@
 
 import { Router } from 'express';
 import { resolve, relative, isAbsolute } from 'node:path';
-import { discoverRepos, getRepoStatus, getLog, getCommit, getFileDiff, getGraph, stagePaths, unstagePaths, commit, push, pull, branch } from '../lib/git.js';
+import { discoverRepos, getRepoStatus, getLog, getCommit, getFileDiff, getGraph, stagePaths, unstagePaths, commit, push, pull, branch, listWorktrees } from '../lib/git.js';
 import { broadcastGitStatus } from '../websocket-handlers.js';
 import { config } from '../config.js';
 
@@ -88,6 +88,28 @@ export function createGitRoutes(): Router {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return res.status(500).json({ error: message });
+    }
+  });
+
+  // GET /api/git/worktrees?repo=<repoPath>
+  // Returns list of worktrees for a repository (Story 6.5 FR8).
+  router.get('/worktrees', async (req, res) => {
+    const repoRaw = req.query.repo;
+    const repo = typeof repoRaw === 'string' && repoRaw ? repoRaw : undefined;
+
+    if (!repo) {
+      return res.status(400).json({ error: 'repo query parameter is required' });
+    }
+
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
+    try {
+      const worktrees = await listWorktrees(repo);
+      return res.json({ worktrees });
+    } catch (err) {
+      return res.status(500).json({ error: 'git operation failed' });
     }
   });
 

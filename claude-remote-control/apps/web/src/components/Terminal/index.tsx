@@ -13,6 +13,7 @@ import { readClipboard } from '@/lib/clipboard';
 import { useTerminalConnection, useTerminalSearch } from './hooks';
 import { useKeybarVisibility } from '@/hooks/useKeybarVisibility';
 import { MinimalSessionHeader } from '@/components/MinimalSessionHeader';
+import type { GitCwdContext } from '247-shared';
 
 interface TerminalProps {
   agentUrl: string;
@@ -32,6 +33,10 @@ interface TerminalProps {
   // StatusLine metrics
   model?: string;
   costUsd?: number;
+  /** Bound sub-path (worktree or subfolder) — session's cwd (Story 6.5) */
+  workingDir?: string;
+  /** Classified git context for bound path — kind, branch, boundPath (Story 6.5) */
+  gitCwdContext?: GitCwdContext;
 }
 
 export function Terminal({
@@ -48,6 +53,8 @@ export function Terminal({
   owner,
   model,
   costUsd,
+  workingDir,
+  gitCwdContext,
 }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
@@ -91,6 +98,7 @@ export function Terminal({
     onCopySuccess: handleCopySuccess,
     isMobile,
     owner,
+    workingDir,
   });
 
   // Handle paste from clipboard (mobile header button).
@@ -147,6 +155,8 @@ export function Terminal({
         onToggleSearch={toggleSearch}
         model={model}
         costUsd={costUsd}
+        workingDir={workingDir}
+        gitCwdContext={gitCwdContext}
       />
 
       <SearchBar

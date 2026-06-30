@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { type SessionInfo } from '@/lib/types';
+import type { GitCwdContext } from '247-shared';
 
 const Terminal = dynamic(() => import('./Terminal').then((mod) => mod.Terminal), {
   ssr: false,
@@ -28,6 +29,10 @@ interface SessionViewProps {
   isMobile?: boolean;
   /** Web user id of the current viewer — tags newly-created sessions for per-user isolation. */
   owner?: string;
+  /** Bound sub-path (worktree or subfolder) — session's cwd (Story 6.5) */
+  workingDir?: string;
+  /** Classified git context for bound path — kind, branch, boundPath (Story 6.5) */
+  gitCwdContext?: GitCwdContext;
 }
 
 /**
@@ -46,6 +51,8 @@ export function SessionView({
   onMenuClick,
   isMobile = false,
   owner,
+  workingDir,
+  gitCwdContext,
 }: SessionViewProps) {
   // Connection state tracked but not displayed (shown in MinimalSessionHeader via Terminal)
   const [_isConnected, setIsConnected] = useState(false);
@@ -83,6 +90,8 @@ export function SessionView({
       onMenuClick={onMenuClick}
       isMobile={isMobile}
       owner={owner}
+      workingDir={workingDir}
+      gitCwdContext={gitCwdContext}
       // StatusLine metrics
       model={sessionInfo?.model}
       costUsd={sessionInfo?.costUsd}

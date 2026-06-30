@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check } from 'lucide-react';
+import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GitRepoStatus, GitFileInfo, GitCommit, GitCommitWithDiff } from '247-shared';
 import { GitHistory } from './GitHistory';
@@ -144,8 +144,12 @@ function RepoGroup({
           {repoName}
         </span>
         {repo.isWorktree && (
-          <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-white/50">
-            worktree
+          <span
+            className="flex items-center gap-1 rounded bg-purple-500/20 px-1.5 py-0.5 text-[10px] text-purple-300"
+            title={repo.mainWorktree ? `Worktree of ${repo.mainWorktree}` : 'Linked worktree'}
+          >
+            <FolderOpen className="h-3 w-3" />
+            <span className="max-w-[80px] truncate">{branchName}</span>
           </span>
         )}
         {totalChanges > 0 && (

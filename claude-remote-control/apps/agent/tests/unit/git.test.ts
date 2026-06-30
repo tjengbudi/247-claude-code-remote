@@ -1556,3 +1556,70 @@ describe('pull — network mode + stdout/stderr classification', () => {
     await expect(pullFn('/repo')).rejects.toThrow('pull failed');
   });
 });
+
+// ============================================================================
+// 12. Worktree — listWorktrees, classifyCwd, validateWorkingDir (Story 6.5)
+// ============================================================================
+
+describe('listWorktrees — porcelain parsing', () => {
+  let listWorktrees: typeof import('../../src/lib/git.js').listWorktrees;
+  let spawnMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const cp = await import('node:child_process');
+    spawnMock = vi.mocked(cp.spawn);
+    spawnMock.mockClear();
+    listWorktrees = (await import('../../src/lib/git.js')).listWorktrees;
+  });
+
+  it('parses main + linked + detached worktrees from porcelain fixture', async () => {
+    const porcelain = [
+      'worktree /home/user/project\nHEAD abc123\nbranch refs/heads/main',
+      'worktree /home/user/project-feature\nHEAD def456\nbranch refs/heads/feature-x',
+      'worktree /home/user/project-detached\nHEAD ghi789\ndetached',
+    ].join('\n\n');
+    spawnMock.mockReturnValue(createMockProc(0, porcelain));
+
+    const result = await listWorktrees('/home/user/project');
+    expect(result).toHaveLength(3);
+    expect(result[0]).toMatchObject({ path: '/home/user/project', head: 'abc123', branch: 'main', detached: false, bare: false });
+    expect(result[1]).toMatchObject({ path: '/home/user/project-feature', head: 'def456', branch: 'feature-x', detached: false });
+    expect(result[2]).toMatchObject({ path: '/home/user/project-detached', head: 'ghi789', detached: true });
+    expect(result[2].branch).toBeUndefined();
+  });
+
+  it('includes bare worktree entry (no HEAD line)', async () => {
+    const porcelain = 'worktree /home/user/project.git\nbranch refs/heads/main\nbare';
+    spawnMock.mockReturnValue(createMockProc(0, porcelain));
+
+    const result = await listWorktrees('/home/user/project.git');
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ path: '/home/user/project.git', bare: true });
+  });
+
+  it('strips refs/heads/ prefix from branch field', async () => {
+    const porcelain = 'worktree /repo\nHEAD aaa\nbranch refs/heads/my-feature';
+    spawnMock.mockReturnValue(createMockProc(0, porcelain));
+
+    const result = await listWorktrees('/repo');
+    expect(result[0].branch).toBe('my-feature');
+  });
+
+  it('throws on non-zero exit code', async () => {
+    spawnMock.mockReturnValue(createMockProc(1, '', 'fatal: not a git repo'));
+    await expect(listWorktrees('/not-a-repo')).rejects.toThrow('git worktree list failed');
+  });
+
+  it('passes repoPath as -C argv element (argv-safety)', async () => {
+    spawnMock.mockReturnValue(createMockProc(0, 'worktree /repo\nHEAD abc\nbranch refs/heads/main'));
+    await listWorktrees('/path with spaces/repo');
+    const [, argv] = spawnMock.mock.calls[0];
+    expect(argv).toContain('-C');
+    const cIdx = argv.indexOf('-C');
+    expect(argv[cIdx + 1]).toBe('/path with spaces/repo');
+  });
+});
+
+// classifyCwd and validateWorkingDir tests live in git-worktree.test.ts
+// (isolated because vi.mock('node:fs/promises') must be file-level — Vitest hoisting conflict)

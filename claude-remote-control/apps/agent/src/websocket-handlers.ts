@@ -8,8 +8,11 @@ import { execSync } from 'child_process';
 import { createTerminal } from './terminal.js';
 import { config } from './config.js';
 import * as sessionsDb from './db/sessions.js';
+import { clearSessionWorkingDir } from './db/sessions.js';
 import * as tasksDb from './db/tasks.js';
 import type { ViewerContext } from './db/sessions.js';
+import { validateWorkingDir, classifyCwd } from './lib/git.js';
+import type { GitCwdContext } from '247-shared';
 import type {
   WSMessageToAgent,
   WSSessionInfo,
@@ -191,6 +194,8 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
   // Web user id of whoever opened the terminal — tags new sessions for
   // per-user view isolation. Null for legacy clients / direct connections.
   const ownerId = url.searchParams.get('owner') || null;
+  // Bound sub-path: absolute path to worktree or subfolder (Story 6.5 FR8)
+  const workingDir = url.searchParams.get('workingDir');
   const sessionName = urlSessionName || generateSessionName(project || 'root');
 
   // Validate project (empty string is allowed for "terminal at root")
@@ -210,6 +215,9 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
 
   console.log(`New terminal connection for project: ${project}`);
   console.log(`Project path: ${projectPath}`);
+  if (workingDir) {
+    console.log(`Requested working_dir: ${workingDir}`);
+  }
 
   // Buffer for messages received before async setup completes
   const messageBuffer: Buffer[] = [];
@@ -242,6 +250,50 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
       return;
     }
 
+    // Resolve and validate working_dir (Story 6.5 FR8)
+    // Priority: query param > stored in DB > project root
+    let actualCwd = projectPath;
+    let workingDirToPersist: string | null = null;
+
+    if (workingDir) {
+      // Query param provided: validate and use it
+      const validation = await validateWorkingDir(workingDir, projectPath);
+      if (!validation.valid) {
+        console.error(`[Terminal] Working directory not allowed: ${workingDir} (${validation.reason})`);
+        ws.close(1008, 'Working directory not allowed');
+        return;
+      }
+      actualCwd = workingDir;
+      workingDirToPersist = workingDir;
+      console.log(`[Terminal] Using bound working_dir from query: ${workingDir}`);
+    } else {
+      // No query param: check if session has stored working_dir in DB
+      const existingSession = sessionsDb.getSession(sessionName);
+      if (existingSession?.working_dir) {
+        const validation = await validateWorkingDir(existingSession.working_dir, projectPath);
+        if (validation.valid) {
+          actualCwd = existingSession.working_dir;
+          workingDirToPersist = existingSession.working_dir;
+          console.log(`[Terminal] Using stored working_dir from DB: ${existingSession.working_dir}`);
+        } else {
+          console.warn(`[Terminal] Stored working_dir no longer valid: ${existingSession.working_dir} (${validation.reason}) — clearing binding, falling back to project root`);
+          // Notify client so it can surface the fallback to the user.
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'cwd-fallback',
+              message: `Bound path '${existingSession.working_dir}' is no longer valid. Starting at project root.`,
+            }));
+          }
+          // Clear stale binding so future reconnects go straight to project root.
+          try {
+            clearSessionWorkingDir(sessionName);
+          } catch (_err) {
+            console.error(`[Terminal] Failed to clear stale working_dir for '${sessionName}':`, _err);
+          }
+        }
+      }
+    }
+
     // Check if session exists before attempting to create/connect
     const sessionExists = tmuxSessionExists(sessionName);
 
@@ -254,10 +306,10 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
       return;
     }
 
-    // Create terminal
+    // Create terminal with validated cwd
     let terminal;
     try {
-      terminal = createTerminal(projectPath, sessionName, {});
+      terminal = createTerminal(actualCwd, sessionName, {});
       terminalRef = terminal;
     } catch (err) {
       console.error('Failed to create terminal:', err);
@@ -286,6 +338,14 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
         .catch((err) => {
           console.error(`Failed to capture history for '${sessionName}':`, err);
         });
+      // Persist a new working_dir binding supplied on reconnect (e.g. user switches worktree).
+      if (workingDirToPersist !== null) {
+        try {
+          sessionsDb.upsertSession(sessionName, { workingDir: workingDirToPersist });
+        } catch (err) {
+          console.error(`Failed to persist working_dir for '${sessionName}' on reconnect:`, err);
+        }
+      }
     } else {
       // New session - register in DB, tagged with the creating web user.
       const now = Date.now();
@@ -295,6 +355,7 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
           lastEvent: 'SessionCreated',
           lastActivity: now,
           ownerId,
+          workingDir: workingDirToPersist,
         });
       } catch (err) {
         console.error(`Failed to persist session '${sessionName}':`, err);
@@ -492,6 +553,17 @@ export function handleSessionsConnection(ws: WebSocket, url?: URL): void {
           continue;
         }
 
+        let gitCwdContext: GitCwdContext | undefined;
+        if (dbSession?.working_dir) {
+          try {
+            const ctx = await classifyCwd(dbSession.working_dir);
+            ctx.boundPath = dbSession.working_dir;
+            gitCwdContext = ctx;
+          } catch {
+            // Stale path — UI shows nothing
+          }
+        }
+
         sessions.push({
           name,
           project,
@@ -502,6 +574,8 @@ export function handleSessionsConnection(ws: WebSocket, url?: URL): void {
           statusSource: dbSession?.status_source ?? undefined,
           attentionReason: dbSession?.attention_reason ?? undefined,
           lastStatusChange: dbSession?.last_status_change ?? undefined,
+          workingDir: dbSession?.working_dir ?? undefined,
+          gitCwdContext,
         });
       }
 

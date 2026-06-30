@@ -106,6 +106,9 @@ function runMigrations(database: Database.Database): void {
       if (currentVersion < 19) {
         migrateToV19(database);
       }
+      if (currentVersion < 20) {
+        migrateToV20(database);
+      }
     }
 
     // Record the new version
@@ -328,6 +331,41 @@ function migrateToV19(database: Database.Database): void {
   }
 
   console.log('[DB] v19 migration: Complete');
+}
+
+/**
+ * Migration to v20: Bound sub-path (working_dir)
+ * Additive — adds a nullable working_dir TEXT column to sessions so a session
+ * can remember its bound worktree or subfolder. NULL = project root (default).
+ * Follows the v18 additive-column pattern (PRAGMA guard → ALTER → re-verify).
+ * NOT a revert of the v15 worktree_path drop — different name and contract.
+ */
+function migrateToV20(database: Database.Database): void {
+  console.log('[DB] v20 migration: Adding bound sub-path working_dir');
+
+  const getColumnNames = (): Set<string> => {
+    const columns = database.pragma('table_info(sessions)') as Array<{ name: string }>;
+    return new Set(columns.map((c) => c.name));
+  };
+
+  if (!getColumnNames().has('working_dir')) {
+    console.log('[DB] v20 migration: Adding column working_dir');
+    try {
+      database.exec('ALTER TABLE sessions ADD COLUMN working_dir TEXT');
+    } catch (err) {
+      // Only swallow "duplicate column name" — rethrow other failures (disk full, locked, etc.)
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('duplicate column name')) throw err;
+      console.log('[DB] v20 migration: Column working_dir already exists, continuing...');
+    }
+  }
+
+  // Verify the column was added
+  if (!getColumnNames().has('working_dir')) {
+    throw new Error('[DB] v20 migration failed: Missing column: working_dir');
+  }
+
+  console.log('[DB] v20 migration: Complete');
 }
 
 /**

@@ -1,3 +1,5 @@
+import type { GitCwdContext } from '247-shared';
+
 export interface LocalMachine {
   id: string;
   name: string;
@@ -16,6 +18,10 @@ export interface SelectedSession {
   project: string;
   environmentId?: string;
   planningProjectId?: string;
+  /** Bound sub-path (worktree or subfolder) — session's cwd (Story 6.5) */
+  workingDir?: string;
+  /** Classified git context for the bound path — kind, branch, boundPath (Story 6.5) */
+  gitCwdContext?: GitCwdContext;
 }
 
 // Re-export StoredAgentConnection from AgentConnectionSettings for convenience
