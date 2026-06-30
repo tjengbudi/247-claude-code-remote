@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check, FolderOpen } from 'lucide-react';
+import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check, FolderOpen, Trash2, GitFork } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { GitRepoStatus, GitFileInfo, GitCommit, GitCommitWithDiff } from '247-shared';
+import type { GitRepoStatus, GitFileInfo, GitCommit, GitCommitWithDiff, GitWorktree } from '247-shared';
 import { GitHistory } from './GitHistory';
 
 // View type matching API response shape from /api/git/status
@@ -13,6 +13,7 @@ export interface GitRepoView {
   mainWorktree?: string;
   status?: GitRepoStatus;
   error?: string;
+  worktrees?: GitWorktree[];
 }
 
 interface GitPanelProps {
@@ -36,6 +37,9 @@ interface GitPanelProps {
   onPush?: (repo: string) => Promise<boolean>;
   onPull?: (repo: string) => Promise<boolean>;
   onSwitchBranch?: (repo: string, name: string, create?: boolean) => Promise<boolean>;
+  // Worktree actions (Story 6.6)
+  onCreateWorktree?: (repo: string, branch: string, newBranch?: boolean) => Promise<{ path: string; branch: string } | null>;
+  onRemoveWorktree?: (repo: string, path: string, opts?: { force?: boolean }) => Promise<{ ok: boolean; dirty?: boolean; liveSession?: boolean }>;
 }
 
 type TabView = 'status' | 'history';
@@ -87,6 +91,8 @@ function RepoGroup({
   onPush,
   onPull,
   onSwitchBranch,
+  onCreateWorktree,
+  onRemoveWorktree,
 }: {
   repo: GitRepoView;
   onStage?: (repo: string, pathspecs: string[], all?: boolean) => Promise<boolean>;
@@ -95,6 +101,8 @@ function RepoGroup({
   onPush?: (repo: string) => Promise<boolean>;
   onPull?: (repo: string) => Promise<boolean>;
   onSwitchBranch?: (repo: string, name: string, create?: boolean) => Promise<boolean>;
+  onCreateWorktree?: (repo: string, branch: string, newBranch?: boolean) => Promise<{ path: string; branch: string } | null>;
+  onRemoveWorktree?: (repo: string, path: string, opts?: { force?: boolean }) => Promise<{ ok: boolean; dirty?: boolean; liveSession?: boolean }>;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [commitMessage, setCommitMessage] = useState('');
@@ -103,6 +111,14 @@ function RepoGroup({
   const [showPullConfirm, setShowPullConfirm] = useState(false);
   const [branchInput, setBranchInput] = useState('');
   const [showBranchInput, setShowBranchInput] = useState(false);
+  // Worktree create state
+  const [showWorktreeInput, setShowWorktreeInput] = useState(false);
+  const [worktreeBranch, setWorktreeBranch] = useState('');
+  const [worktreeNew, setWorktreeNew] = useState(true);
+  // Worktree remove confirm state: path being confirmed, or null
+  const [removingWorktree, setRemovingWorktree] = useState<string | null>(null);
+  // Dirty-worktree force confirm: path pending force removal
+  const [dirtyWorktree, setDirtyWorktree] = useState<string | null>(null);
 
   if (repo.error) {
     return (
@@ -378,6 +394,155 @@ function RepoGroup({
               </div>
             </div>
           )}
+
+          {/* Worktree section — only shown on non-worktree repos with create/remove actions */}
+          {!repo.isWorktree && (onCreateWorktree || onRemoveWorktree) && (
+            <div className="mt-2 border-t border-white/5 pt-2">
+              {/* Worktrees list from repo.worktrees */}
+              {repo.worktrees && repo.worktrees.length > 0 ? (
+                <div className="mb-2">
+                  <p className="mb-1 text-xs text-white/40">Linked worktrees</p>
+                  {repo.worktrees.map((wt) => {
+                    const wtName = wt.path.split('/').pop() || wt.path;
+                    const isRemovingThis = removingWorktree === wt.path;
+                    const isDirtyThis = dirtyWorktree === wt.path;
+                    return (
+                      <div key={wt.path} className="mb-1 rounded border border-white/5 bg-white/[0.02] px-2 py-1">
+                        <div className="flex items-center gap-2">
+                          <FolderOpen className="h-3 w-3 shrink-0 text-purple-400" />
+                          <span className="flex-1 truncate text-xs text-white/70" title={wt.path}>{wtName}</span>
+                          {wt.branch && (
+                            <span className="shrink-0 text-[10px] text-purple-300">{wt.branch}</span>
+                          )}
+                          {onRemoveWorktree && !isRemovingThis && !isDirtyThis && (
+                            <button
+                              title="Remove worktree"
+                              onClick={() => setRemovingWorktree(wt.path)}
+                              className="shrink-0 rounded p-0.5 text-white/30 hover:bg-red-500/20 hover:text-red-400"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                        {isRemovingThis && (
+                          <div className="mt-1 rounded border border-red-500/20 bg-red-500/5 p-1.5">
+                            <p className="mb-1 truncate text-[10px] text-red-400/80" title={wt.path}>
+                              Remove <span className="font-mono">{wtName}</span> ({wt.branch || 'detached'})?
+                            </p>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={async () => {
+                                  if (!onRemoveWorktree) return;
+                                  const result = await onRemoveWorktree(repo.repoPath, wt.path);
+                                  if (result.liveSession) {
+                                    setRemovingWorktree(null);
+                                  } else if (result.dirty) {
+                                    setRemovingWorktree(null);
+                                    setDirtyWorktree(wt.path);
+                                  } else {
+                                    setRemovingWorktree(null);
+                                  }
+                                }}
+                                className="flex-1 rounded bg-red-500/20 px-2 py-0.5 text-[10px] text-red-400 hover:bg-red-500/30"
+                              >
+                                Confirm remove
+                              </button>
+                              <button
+                                onClick={() => setRemovingWorktree(null)}
+                                className="flex-1 rounded bg-white/10 px-2 py-0.5 text-[10px] text-white/50 hover:bg-white/20"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {isDirtyThis && (
+                          <div className="mt-1 rounded border border-amber-500/20 bg-amber-500/5 p-1.5">
+                            <p className="mb-1 text-[10px] text-amber-400/80">
+                              Has uncommitted changes. Remove anyway?
+                            </p>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={async () => {
+                                  if (!onRemoveWorktree) return;
+                                  const result = await onRemoveWorktree(repo.repoPath, wt.path, { force: true });
+                                  // Only dismiss on success; on failure the hook
+                                  // toasts and we keep the confirm open to retry.
+                                  if (result.ok) setDirtyWorktree(null);
+                                }}
+                                className="flex-1 rounded bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-400 hover:bg-amber-500/30"
+                              >
+                                Force remove
+                              </button>
+                              <button
+                                onClick={() => setDirtyWorktree(null)}
+                                className="flex-1 rounded bg-white/10 px-2 py-0.5 text-[10px] text-white/50 hover:bg-white/20"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mb-2 text-xs text-white/30">No linked worktrees</p>
+              )}
+
+              {/* New worktree control */}
+              {onCreateWorktree && !showWorktreeInput && (
+                <button
+                  onClick={() => setShowWorktreeInput(true)}
+                  title="New worktree"
+                  className="flex items-center gap-1 rounded bg-white/5 px-2 py-1 text-xs text-white/50 hover:bg-white/10 hover:text-white/70"
+                >
+                  <GitFork className="h-3 w-3" />
+                  New worktree
+                </button>
+              )}
+              {onCreateWorktree && showWorktreeInput && (
+                <div>
+                  <input
+                    type="text"
+                    value={worktreeBranch}
+                    onChange={(e) => setWorktreeBranch(e.target.value)}
+                    placeholder="Branch name"
+                    className="mb-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/90 placeholder:text-white/30 outline-none focus:border-white/20"
+                  />
+                  <label className="mb-1 flex items-center gap-1.5 text-xs text-white/50 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={worktreeNew}
+                      onChange={(e) => setWorktreeNew(e.target.checked)}
+                      className="accent-purple-400"
+                    />
+                    Create new branch
+                  </label>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={async () => {
+                        if (!worktreeBranch.trim()) return;
+                        const result = await onCreateWorktree(repo.repoPath, worktreeBranch.trim(), worktreeNew);
+                        if (result) { setWorktreeBranch(''); setShowWorktreeInput(false); setWorktreeNew(true); }
+                      }}
+                      disabled={!worktreeBranch.trim()}
+                      className="flex-1 rounded bg-purple-500/20 px-2 py-1 text-xs text-purple-400 hover:bg-purple-500/30 disabled:opacity-30"
+                    >
+                      Create
+                    </button>
+                    <button
+                      onClick={() => { setShowWorktreeInput(false); setWorktreeBranch(''); setWorktreeNew(true); }}
+                      className="flex-1 rounded bg-white/10 px-2 py-1 text-xs text-white/50 hover:bg-white/20"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -431,6 +596,8 @@ export function GitPanel({
   onPush,
   onPull,
   onSwitchBranch,
+  onCreateWorktree,
+  onRemoveWorktree,
 }: GitPanelProps) {
   const [activeTab, setActiveTab] = useState<TabView>('status');
 
@@ -497,6 +664,8 @@ export function GitPanel({
               onPush={onPush}
               onPull={onPull}
               onSwitchBranch={onSwitchBranch}
+              onCreateWorktree={onCreateWorktree}
+              onRemoveWorktree={onRemoveWorktree}
             />
           ))}
         </div>

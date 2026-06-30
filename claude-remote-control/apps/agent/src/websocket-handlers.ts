@@ -74,7 +74,7 @@ function generateSessionName(project: string): string {
 /**
  * Check if a tmux session exists
  */
-function tmuxSessionExists(sessionName: string): boolean {
+export function tmuxSessionExists(sessionName: string): boolean {
   try {
     execSync(`tmux has-session -t "${sessionName}" 2>/dev/null`);
     return true;

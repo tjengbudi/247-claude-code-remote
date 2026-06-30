@@ -67,6 +67,18 @@ interface UseGitActionsReturn {
     name: string,
     create?: boolean
   ) => Promise<boolean>;
+  createWorktree: (
+    machineId: string,
+    repo: string,
+    branch: string,
+    newBranch?: boolean
+  ) => Promise<{ path: string; branch: string } | null>;
+  removeWorktree: (
+    machineId: string,
+    repo: string,
+    path: string,
+    opts?: { force?: boolean }
+  ) => Promise<{ ok: boolean; dirty?: boolean; liveSession?: boolean }>;
 }
 
 /**
@@ -446,6 +458,84 @@ export function useGitActions(
     [findMachine]
   );
 
+  const createWorktree = useCallback(
+    async (machineId: string, repo: string, branch: string, newBranch = false): Promise<{ path: string; branch: string } | null> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return null;
+      }
+
+      try {
+        const url = buildApiUrl(machine.url, '/api/git/worktree');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: machine.id, repo, branch, newBranch }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Failed to create worktree' }));
+          toast.error(err.error || 'Failed to create worktree');
+          return null;
+        }
+        const data = await response.json();
+        return data.worktree as { path: string; branch: string };
+      } catch (err) {
+        console.error('Failed to create worktree:', err);
+        toast.error('Could not connect to agent');
+        return null;
+      }
+    },
+    [findMachine]
+  );
+
+  const removeWorktree = useCallback(
+    async (
+      machineId: string,
+      repo: string,
+      path: string,
+      opts?: { force?: boolean }
+    ): Promise<{ ok: boolean; dirty?: boolean; liveSession?: boolean }> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return { ok: false };
+      }
+
+      try {
+        const url = buildApiUrl(machine.url, '/api/git/worktree/remove');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ project: machine.id, repo, path, force: opts?.force }),
+        });
+
+        if (response.status === 409) {
+          const err = await response.json().catch(() => ({ error: 'conflict' }));
+          // Dirty stays silent — GitPanel surfaces an inline force-confirm flow.
+          if (err.dirty) return { ok: false, dirty: true };
+          // Live-session block has no follow-up UI: surface it so the safety
+          // gate isn't a silent no-op (the user must end the session first).
+          toast.error(err.error || 'A live session is using this worktree — end the session first');
+          return { ok: false, liveSession: true };
+        }
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ error: 'Failed to remove worktree' }));
+          toast.error(err.error || 'Failed to remove worktree');
+          return { ok: false };
+        }
+        return { ok: true };
+      } catch (err) {
+        console.error('Failed to remove worktree:', err);
+        toast.error('Could not connect to agent');
+        return { ok: false };
+      }
+    },
+    [findMachine]
+  );
+
   return {
     fetchLog,
     fetchCommit,
@@ -457,5 +547,7 @@ export function useGitActions(
     pushChanges,
     pullChanges,
     switchBranch,
+    createWorktree,
+    removeWorktree,
   };
 }

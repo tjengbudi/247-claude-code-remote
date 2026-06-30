@@ -4,9 +4,11 @@
  */
 
 import { Router } from 'express';
-import { resolve, relative, isAbsolute } from 'node:path';
-import { discoverRepos, getRepoStatus, getLog, getCommit, getFileDiff, getGraph, stagePaths, unstagePaths, commit, push, pull, branch, listWorktrees } from '../lib/git.js';
-import { broadcastGitStatus } from '../websocket-handlers.js';
+import { resolve, relative, isAbsolute, sep } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { discoverRepos, getRepoStatus, getLog, getCommit, getFileDiff, getGraph, stagePaths, unstagePaths, commit, push, pull, branch, listWorktrees, createWorktree, removeWorktree } from '../lib/git.js';
+import { broadcastGitStatus, tmuxSessionExists } from '../websocket-handlers.js';
+import { getAllSessions } from '../db/sessions.js';
 import { config } from '../config.js';
 
 /**
@@ -38,6 +40,55 @@ function isRepoAllowed(repo: string): boolean {
 function isFilePathAllowed(repo: string, filePath: string): boolean {
   const repoRoot = resolve(repo);
   return isContained(repoRoot, resolve(repoRoot, filePath));
+}
+
+/**
+ * Canonicalize a path for comparison: resolve `..`/trailing-slash AND symlinks.
+ * `git worktree list` emits realpath'd paths while a session's stored `working_dir`
+ * is raw client input, so a symlinked component (e.g. macOS `/tmp`→`/private/tmp`)
+ * would defeat a plain `resolve()` string compare. Falls back to `resolve()` when the
+ * path no longer exists on disk (realpath throws).
+ */
+function canonicalPath(p: string): string {
+  const resolved = resolve(p);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+/** True when `child` is `parent` or sits underneath it (both already canonical). */
+function isAtOrUnder(parent: string, child: string): boolean {
+  return child === parent || child.startsWith(parent + sep);
+}
+
+/**
+ * True when a worktree create/remove error is the caller's fault (→ 400), not a
+ * server fault (→ 500). Covers every `validateSafeRef` reason (whitespace, control
+ * characters, dash/injection, `..` range syntax) plus the lib's mapped git stderr
+ * (already exists / already checked out / invalid reference / uncommitted changes /
+ * not a registered worktree).
+ */
+function isClientGitError(msg: string): boolean {
+  return /already exists|already checked out|invalid reference|uncommitted changes|not a registered worktree|whitespace|control characters|injection|dash|range syntax|empty ref/.test(
+    msg
+  );
+}
+
+/**
+ * Returns true if any live tmux session is currently bound to worktreePath
+ * or to a subfolder within it. Cross-references DB sessions (working_dir)
+ * against the tmux probe. Paths are symlink-canonicalized before comparison so
+ * the destructive-remove gate cannot be defeated by a symlinked path component
+ * or by a session bound to a sub-path of the worktree.
+ */
+function worktreeHasLiveSession(worktreePath: string): boolean {
+  const sessions = getAllSessions();
+  const target = canonicalPath(worktreePath);
+  return sessions.some(
+    (s) => s.working_dir !== null && s.working_dir !== undefined && isAtOrUnder(target, canonicalPath(s.working_dir)) && tmuxSessionExists(s.name)
+  );
 }
 
 export function createGitRoutes(): Router {
@@ -108,7 +159,7 @@ export function createGitRoutes(): Router {
     try {
       const worktrees = await listWorktrees(repo);
       return res.json({ worktrees });
-    } catch (err) {
+    } catch (_err) {
       return res.status(500).json({ error: 'git operation failed' });
     }
   });
@@ -404,6 +455,93 @@ export function createGitRoutes(): Router {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (errMsg.includes('no upstream') || errMsg.includes('authentication') || errMsg.includes('conflicts')) {
+        return res.status(400).json({ error: errMsg });
+      }
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    try {
+      const status = await getRepoStatus(repo);
+      broadcastGitStatus(project, repo, status);
+    } catch (_err) { /* status refresh best-effort */ }
+    return res.json({ ok: true });
+  });
+
+  // POST /api/git/worktree (create)
+  router.post('/worktree', async (req, res) => {
+    const { project, repo, branch: branchName, newBranch } = req.body;
+    if (!project || !repo) {
+      return res.status(400).json({ error: 'project and repo are required' });
+    }
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+    if (!branchName || typeof branchName !== 'string') {
+      return res.status(400).json({ error: 'branch name is required' });
+    }
+
+    let result: { path: string; branch: string };
+    try {
+      result = await createWorktree(repo, branchName, { newBranch: Boolean(newBranch) });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (isClientGitError(errMsg)) {
+        return res.status(400).json({ error: errMsg });
+      }
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    try {
+      const status = await getRepoStatus(repo);
+      broadcastGitStatus(project, repo, status);
+    } catch (_err) { /* status refresh best-effort */ }
+    return res.json({ ok: true, worktree: result });
+  });
+
+  // POST /api/git/worktree/remove
+  router.post('/worktree/remove', async (req, res) => {
+    const { project, repo, path, force } = req.body;
+    if (!project || !repo || !path) {
+      return res.status(400).json({ error: 'project, repo, and path are required' });
+    }
+    if (!isRepoAllowed(repo)) {
+      return res.status(400).json({ error: 'repo is outside the allowed projects root' });
+    }
+
+    // Validate path is a registered worktree of this repo (git vouches; no isRepoAllowed check —
+    // sibling worktrees live outside allowedRoot by design, FR8)
+    let worktrees: Awaited<ReturnType<typeof listWorktrees>>;
+    try {
+      worktrees = await listWorktrees(repo);
+    } catch (_err) {
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    const target = canonicalPath(path);
+    if (!worktrees.some(wt => canonicalPath(wt.path) === target)) {
+      return res.status(400).json({ error: 'path is not a registered worktree of this repo' });
+    }
+
+    // AC4: live-session gate — BEFORE any git mutation
+    const hasLive = worktreeHasLiveSession(path);
+    if (hasLive) {
+      return res.status(409).json({ error: 'a live session is using this worktree — end the session first' });
+    }
+
+    // AC5: dirty gate
+    let repoStatus: Awaited<ReturnType<typeof getRepoStatus>>;
+    try {
+      repoStatus = await getRepoStatus(path);
+    } catch (_err) {
+      return res.status(500).json({ error: 'git operation failed' });
+    }
+    const dirty = repoStatus.stagedCount + repoStatus.unstagedCount + repoStatus.untrackedCount + repoStatus.conflicted > 0;
+    if (dirty && !force) {
+      return res.status(409).json({ error: 'worktree has uncommitted changes — confirm to remove', dirty: true });
+    }
+
+    try {
+      await removeWorktree(repo, path, { force: Boolean(force) });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (isClientGitError(errMsg)) {
         return res.status(400).json({ error: errMsg });
       }
       return res.status(500).json({ error: 'git operation failed' });

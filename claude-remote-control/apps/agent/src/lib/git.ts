@@ -9,7 +9,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { access, constants, readFile, readdir, stat } from 'node:fs/promises';
 
 export type {
@@ -907,6 +907,84 @@ export async function listWorktrees(repoPath: string): Promise<GitWorktree[]> {
   }
 
   return worktrees;
+}
+
+// ============================================================================
+// Worktree Lifecycle (Story 6.6 — FR8 create/remove)
+// ============================================================================
+
+/**
+ * Build a deterministic sibling path for a new worktree.
+ * Places worktrees under `.247-worktrees/<repoName>/<sanitized-branch>` adjacent to the main repo.
+ * Pure function — no git calls — so it can be unit-tested directly.
+ */
+export function worktreeSiblingPath(gitRoot: string, branch: string): string {
+  const sanitized = branch.replace(/\//g, '-');
+  return resolve(gitRoot, '..', '.247-worktrees', basename(gitRoot), sanitized);
+}
+
+/**
+ * Create a linked worktree at a sibling location outside the main repo.
+ * Validates the branch with validateSafeRef before any git operation.
+ */
+export async function createWorktree(
+  repoPath: string,
+  branch: string,
+  opts?: { newBranch?: boolean }
+): Promise<{ path: string; branch: string }> {
+  const validation = validateSafeRef(branch);
+  if (!validation.valid) {
+    throw new Error(validation.reason);
+  }
+
+  // Resolve true git root — repoPath may be a subfolder
+  const rootResult = await runGit(['-C', repoPath, 'rev-parse', '--show-toplevel']);
+  const gitRoot = rootResult.code === 0 ? rootResult.stdout.trim() : repoPath;
+
+  const worktreePath = worktreeSiblingPath(gitRoot, branch);
+
+  const args = opts?.newBranch
+    ? ['-C', repoPath, 'worktree', 'add', '-b', branch, worktreePath]
+    : ['-C', repoPath, 'worktree', 'add', worktreePath, branch];
+
+  const result = await runGit(args);
+  if (result.code !== 0) {
+    const stderr = result.stderr;
+    if (/already exists|already checked out/.test(stderr)) {
+      throw new Error('branch already exists or is already checked out');
+    }
+    if (/invalid reference|not a valid object name/.test(stderr)) {
+      throw new Error('invalid reference — branch does not exist');
+    }
+    throw new Error('worktree create failed');
+  }
+
+  return { path: worktreePath, branch };
+}
+
+/**
+ * Remove a linked worktree. Passes --force only when opts.force is true.
+ */
+export async function removeWorktree(
+  repoPath: string,
+  worktreePath: string,
+  opts?: { force?: boolean }
+): Promise<void> {
+  const args = opts?.force
+    ? ['-C', repoPath, 'worktree', 'remove', '--force', worktreePath]
+    : ['-C', repoPath, 'worktree', 'remove', worktreePath];
+
+  const result = await runGit(args);
+  if (result.code !== 0) {
+    const stderr = result.stderr;
+    if (/is dirty|contains modified or untracked files/.test(stderr)) {
+      throw new Error('worktree has uncommitted changes — confirm to force removal');
+    }
+    if (/is not a working tree|not a working tree/.test(stderr)) {
+      throw new Error('not a registered worktree');
+    }
+    throw new Error('worktree remove failed');
+  }
 }
 
 /**

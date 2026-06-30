@@ -22,6 +22,8 @@ vi.mock('lucide-react', () => ({
   GitCompareArrows: () => null,
   AlertTriangle: () => null,
   Plus: () => null,
+  Trash2: () => null,
+  GitFork: () => null,
   Minus: () => null,
   Check: () => null,
   GitMerge: () => null,
@@ -492,6 +494,124 @@ describe('GitPanel — render', () => {
       fireEvent.click(document.querySelector('[title="Push"]') as HTMLElement);
       fireEvent.click(document.querySelector('[title="Confirm push"]') as HTMLElement);
       expect(document.querySelector('[title="Confirm push"]')).toBeFalsy();
+    });
+  });
+
+  describe('worktree list + remove confirm (AC3, AC5)', () => {
+    const makeStatusWithBranch = (branchName: string): GitRepoStatus => ({
+      branch: { head: null, upstream: null, ahead: 0, behind: 0, branchName },
+      files: [],
+      conflicted: 0,
+      stagedCount: 0,
+      unstagedCount: 0,
+      untrackedCount: 0,
+      ignoredCount: 0,
+    });
+
+    it('shows empty worktrees message when repo has no worktrees', () => {
+      const repo: GitRepoView = {
+        repoPath: '/home/user/repo',
+        isWorktree: false,
+        status: makeStatusWithBranch('main'),
+        worktrees: [],
+      };
+      const onCreateWorktree = vi.fn().mockResolvedValue({ path: '/wt', branch: 'feat' });
+      render(
+        <GitPanel
+          {...BASE_PANEL_PROPS}
+          project="p"
+          repos={[repo]}
+          onCreateWorktree={onCreateWorktree}
+        />
+      );
+      expect(screen.getByText(/no linked worktrees/i)).toBeTruthy();
+    });
+
+    it('renders worktree entry with branch name', () => {
+      const repo: GitRepoView = {
+        repoPath: '/home/user/repo',
+        isWorktree: false,
+        status: makeStatusWithBranch('main'),
+        worktrees: [{ path: '/home/user/.247-worktrees/repo/feat', branch: 'feat', head: 'abc123', detached: false, bare: false }],
+      };
+      const onRemoveWorktree = vi.fn().mockResolvedValue({ ok: true });
+      render(
+        <GitPanel
+          {...BASE_PANEL_PROPS}
+          project="p"
+          repos={[repo]}
+          onRemoveWorktree={onRemoveWorktree}
+        />
+      );
+      // branch name appears in both worktree badge and worktree list entry
+      expect(screen.getAllByText('feat').length).toBeGreaterThan(0);
+    });
+
+    it('shows remove confirm dialog on first tap, then calls onRemoveWorktree on second tap (AC5)', () => {
+      const repo: GitRepoView = {
+        repoPath: '/home/user/repo',
+        isWorktree: false,
+        status: makeStatusWithBranch('main'),
+        worktrees: [{ path: '/home/user/.247-worktrees/repo/feat', branch: 'feat', head: 'abc', detached: false, bare: false }],
+      };
+      const onRemoveWorktree = vi.fn().mockResolvedValue({ ok: true });
+      render(
+        <GitPanel
+          {...BASE_PANEL_PROPS}
+          project="p"
+          repos={[repo]}
+          onRemoveWorktree={onRemoveWorktree}
+        />
+      );
+      const removeBtn = document.querySelector('[title="Remove worktree"]') as HTMLElement;
+      expect(removeBtn).toBeTruthy();
+      expect(onRemoveWorktree).not.toHaveBeenCalled();
+
+      fireEvent.click(removeBtn);
+      expect(screen.getByText(/confirm remove/i)).toBeTruthy();
+      expect(onRemoveWorktree).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByText(/confirm remove/i));
+      expect(onRemoveWorktree).toHaveBeenCalledWith('/home/user/repo', '/home/user/.247-worktrees/repo/feat');
+    });
+
+    it('does not show worktree section on repos that are themselves worktrees', () => {
+      const repo: GitRepoView = {
+        repoPath: '/home/user/.247-worktrees/repo/feat',
+        isWorktree: true,
+        status: makeStatusWithBranch('feat'),
+        worktrees: [],
+      };
+      const onCreateWorktree = vi.fn();
+      render(
+        <GitPanel
+          {...BASE_PANEL_PROPS}
+          project="p"
+          repos={[repo]}
+          onCreateWorktree={onCreateWorktree}
+        />
+      );
+      expect(screen.queryByText(/no linked worktrees/i)).toBeFalsy();
+      expect(screen.queryByText(/new worktree/i)).toBeFalsy();
+    });
+
+    it('shows "New worktree" button when onCreateWorktree is provided', () => {
+      const repo: GitRepoView = {
+        repoPath: '/home/user/repo',
+        isWorktree: false,
+        status: makeStatusWithBranch('main'),
+        worktrees: [],
+      };
+      const onCreateWorktree = vi.fn().mockResolvedValue({ path: '/wt', branch: 'feat' });
+      render(
+        <GitPanel
+          {...BASE_PANEL_PROPS}
+          project="p"
+          repos={[repo]}
+          onCreateWorktree={onCreateWorktree}
+        />
+      );
+      expect(screen.getByTitle('New worktree')).toBeTruthy();
     });
   });
 });
