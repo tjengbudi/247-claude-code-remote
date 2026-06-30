@@ -31,15 +31,15 @@ function isContained(root: string, target: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
 }
 
-/** Reject a `repo` that resolves outside the allowed projects root. */
+/** Reject a `repo` that resolves outside the allowed projects root (symlink-safe). */
 function isRepoAllowed(repo: string): boolean {
-  return isContained(allowedRoot(), resolve(repo));
+  return isContained(canonicalPath(allowedRoot()), canonicalPath(repo));
 }
 
 /** Reject a per-file pathspec that escapes the repo tree (e.g. `../../etc/passwd`). */
 function isFilePathAllowed(repo: string, filePath: string): boolean {
-  const repoRoot = resolve(repo);
-  return isContained(repoRoot, resolve(repoRoot, filePath));
+  const repoRoot = canonicalPath(repo);
+  return isContained(repoRoot, canonicalPath(resolve(repo, filePath)));
 }
 
 /**
@@ -120,13 +120,14 @@ export function createGitRoutes(): Router {
               mainWorktree: repo.worktreeInfo?.mainWorktree,
               status,
             };
-          } catch (err) {
-            // If a repo's status fails, include it with error info
+          } catch (_err) {
+            // If a repo's status fails, include it with a safe error (AC4: never leak
+            // raw err.message — git stderr can carry absolute internal paths).
             return {
               repoPath: repo.path,
               isWorktree: !repo.topLevel,
               mainWorktree: repo.worktreeInfo?.mainWorktree,
-              error: err instanceof Error ? err.message : String(err),
+              error: 'git operation failed',
             };
           }
         })
@@ -136,9 +137,8 @@ export function createGitRoutes(): Router {
         repos,
         capped: discovery.capped,
       });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return res.status(500).json({ error: message });
+    } catch (_err) {
+      return res.status(500).json({ error: 'git operation failed' });
     }
   });
 
@@ -158,7 +158,14 @@ export function createGitRoutes(): Router {
 
     try {
       const worktrees = await listWorktrees(repo);
-      return res.json({ worktrees });
+      // Do NOT leak absolute host paths (AC2): express each worktree path relative to
+      // allowedRoot. Worktrees git created as siblings legitimately live outside the
+      // root (worktreeSiblingPath places them in gitRoot's parent), so filtering them
+      // out would hide worktrees the app itself creates/removes — instead redact the
+      // absolute prefix. The remove route rebases the relative path back (resolve()).
+      const root = canonicalPath(allowedRoot());
+      const visible = worktrees.map((wt) => ({ ...wt, path: relative(root, canonicalPath(wt.path)) }));
+      return res.json({ worktrees: visible });
     } catch (_err) {
       return res.status(500).json({ error: 'git operation failed' });
     }
@@ -514,13 +521,20 @@ export function createGitRoutes(): Router {
     } catch (_err) {
       return res.status(500).json({ error: 'git operation failed' });
     }
-    const target = canonicalPath(path);
+    // `path` may arrive relative to allowedRoot (GET /worktrees now returns relative paths
+    // to avoid leaking absolute host paths). Rebase onto the SAME canonical root the GET
+    // side used, so the round-trip is exact even when basePath contains a symlink.
+    // resolve() is idempotent for absolute paths, so older clients sending absolute paths
+    // still work. `target` (canonical absolute) is used for ALL downstream operations —
+    // passing the raw relative `path` would resolve against process.cwd and bypass the
+    // live-session gate / break the git remove for sibling worktrees.
+    const target = canonicalPath(resolve(canonicalPath(allowedRoot()), path));
     if (!worktrees.some(wt => canonicalPath(wt.path) === target)) {
       return res.status(400).json({ error: 'path is not a registered worktree of this repo' });
     }
 
     // AC4: live-session gate — BEFORE any git mutation
-    const hasLive = worktreeHasLiveSession(path);
+    const hasLive = worktreeHasLiveSession(target);
     if (hasLive) {
       return res.status(409).json({ error: 'a live session is using this worktree — end the session first' });
     }
@@ -528,7 +542,7 @@ export function createGitRoutes(): Router {
     // AC5: dirty gate
     let repoStatus: Awaited<ReturnType<typeof getRepoStatus>>;
     try {
-      repoStatus = await getRepoStatus(path);
+      repoStatus = await getRepoStatus(target);
     } catch (_err) {
       return res.status(500).json({ error: 'git operation failed' });
     }
@@ -538,7 +552,7 @@ export function createGitRoutes(): Router {
     }
 
     try {
-      await removeWorktree(repo, path, { force: Boolean(force) });
+      await removeWorktree(repo, target, { force: Boolean(force) });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (isClientGitError(errMsg)) {

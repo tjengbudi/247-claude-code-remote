@@ -11,7 +11,7 @@ import * as sessionsDb from './db/sessions.js';
 import { clearSessionWorkingDir } from './db/sessions.js';
 import * as tasksDb from './db/tasks.js';
 import type { ViewerContext } from './db/sessions.js';
-import { validateWorkingDir, classifyCwd } from './lib/git.js';
+import { validateWorkingDir, classifyCwd, MAX_WORKING_DIR_LENGTH } from './lib/git.js';
 import type { GitCwdContext } from '247-shared';
 import type {
   WSMessageToAgent,
@@ -256,6 +256,11 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
     let workingDirToPersist: string | null = null;
 
     if (workingDir) {
+      if (workingDir.length > MAX_WORKING_DIR_LENGTH) {
+        console.error(`[Terminal] workingDir exceeds maximum length (${workingDir.length})`);
+        ws.close(1008, 'Working directory not allowed');
+        return;
+      }
       // Query param provided: validate and use it
       const validation = await validateWorkingDir(workingDir, projectPath);
       if (!validation.valid) {

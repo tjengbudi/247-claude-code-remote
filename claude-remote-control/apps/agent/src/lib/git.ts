@@ -10,7 +10,7 @@
 
 import { spawn } from 'node:child_process';
 import { join, resolve, basename } from 'node:path';
-import { access, constants, readFile, readdir, stat } from 'node:fs/promises';
+import { access, constants, readFile, readdir, realpath, stat } from 'node:fs/promises';
 
 export type {
   GitExecResult,
@@ -1058,31 +1058,59 @@ export async function classifyCwd(pathToClassify: string): Promise<GitCwdContext
  * 2. Any subfolder within the project root
  * 3. Any registered worktree (from `git worktree list`)
  *
+/** Maximum allowed length (UTF-16 code units, via String.length) for a workingDir
+ *  input (guards against DoS via oversized strings). */
+export const MAX_WORKING_DIR_LENGTH = 4096;
+
+/**
  * @param workingDir - The working_dir to validate (absolute path)
  * @param projectRoot - The project's allowed root
  */
 export async function validateWorkingDir(workingDir: string, projectRoot: string): Promise<{ valid: boolean; reason?: string }> {
-  const resolved = resolve(workingDir);
+  if (workingDir.length > MAX_WORKING_DIR_LENGTH) {
+    return { valid: false, reason: 'workingDir exceeds maximum allowed length' };
+  }
+
   const resolvedRoot = resolve(projectRoot);
 
+  // Resolve symlinks so a symlink inside the root that points outside cannot pass containment.
+  let realWorkingDir: string;
+  try {
+    realWorkingDir = await realpath(workingDir);
+  } catch {
+    realWorkingDir = resolve(workingDir);
+  }
+
+  let realRoot: string;
+  try {
+    realRoot = await realpath(resolvedRoot);
+  } catch {
+    realRoot = resolvedRoot;
+  }
+
   // Check containment: must be within or equal to project root, OR be a registered worktree
-  const isContained = resolved === resolvedRoot || resolved.startsWith(resolvedRoot + '/');
+  const isContained = realWorkingDir === realRoot || realWorkingDir.startsWith(realRoot + '/');
 
   if (!isContained) {
     // Check if it's a registered worktree (worktrees can be siblings, not subfolders).
     // Run listWorktrees against the git root (not basePath which may not be a git repo).
     try {
-      const gitRootResult = await runGit(['rev-parse', '--show-toplevel'], { cwd: resolvedRoot });
-      const repoRoot = gitRootResult.code === 0 ? resolve(gitRootResult.stdout.trim()) : resolvedRoot;
+      const gitRootResult = await runGit(['rev-parse', '--show-toplevel'], { cwd: realRoot });
+      const repoRoot = gitRootResult.code === 0 ? resolve(gitRootResult.stdout.trim()) : realRoot;
       const worktrees = await listWorktrees(repoRoot);
-      const isRegisteredWorktree = worktrees.some((wt) => resolve(wt.path) === resolved);
+      const wtRealpaths = await Promise.all(
+        worktrees.map(async (wt) => {
+          try { return await realpath(wt.path); } catch { return resolve(wt.path); }
+        })
+      );
+      const isRegisteredWorktree = wtRealpaths.some((wtReal) => wtReal === realWorkingDir);
       if (isRegisteredWorktree) {
         // Still verify the worktree directory exists — git keeps stale entries until `git worktree prune`
         try {
-          await access(resolved, constants.R_OK);
+          await access(realWorkingDir, constants.R_OK);
           return { valid: true };
         } catch {
-          return { valid: false, reason: `Registered worktree path no longer exists: ${resolved}` };
+          return { valid: false, reason: `Registered worktree path no longer exists: ${realWorkingDir}` };
         }
       }
     } catch (err) {
@@ -1094,7 +1122,7 @@ export async function validateWorkingDir(workingDir: string, projectRoot: string
 
   // Path is within project root — check it exists
   try {
-    await access(resolved, constants.R_OK);
+    await access(realWorkingDir, constants.R_OK);
   } catch {
     return { valid: false, reason: 'path does not exist or is not readable' };
   }
