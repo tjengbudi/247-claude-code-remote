@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, X, Archive, DollarSign } from 'lucide-react';
+import { Clock, X, Archive, DollarSign, Pencil, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/time';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -16,6 +16,8 @@ export interface SessionMiniCardProps {
   onClick: () => void;
   onKill?: () => Promise<void>;
   onArchive?: () => Promise<void>;
+  /** Save a new description (empty string clears it) for this session. */
+  onEditDescription?: (description: string) => void;
 }
 
 export function SessionMiniCard({
@@ -24,16 +26,46 @@ export function SessionMiniCard({
   onClick,
   onKill,
   onArchive,
+  onEditDescription,
 }: SessionMiniCardProps) {
   const [showKillConfirm, setShowKillConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [isKilling, setIsKilling] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(session.description ?? '');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const technicalName = session.name.split('--')[1] || session.name;
   // Human-readable label wins as the title; technical name drops to a subtitle.
   const displayName = session.description || technicalName;
   const hasDescription = Boolean(session.description);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const startEditing = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDraft(session.description ?? '');
+    setEditing(true);
+  };
+
+  const commitEdit = () => {
+    const next = draft.trim();
+    if (next !== (session.description ?? '')) {
+      onEditDescription?.(next);
+    }
+    setEditing(false);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setDraft(session.description ?? '');
+  };
 
   const handleKillClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -86,8 +118,22 @@ export function SessionMiniCard({
         )}
       >
         {/* Action buttons */}
-        {(onKill || onArchive) && (
+        {(onKill || onArchive || onEditDescription) && !editing && (
           <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+            {onEditDescription && (
+              <button
+                onClick={startEditing}
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-md',
+                  'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60',
+                  'touch-manipulation transition-all active:scale-90'
+                )}
+                aria-label="Edit description"
+                data-testid="edit-description-button"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
             {onArchive && (
               <button
                 onClick={handleArchiveClick}
@@ -128,20 +174,50 @@ export function SessionMiniCard({
             )}
           />
 
-          <div className="min-w-0 flex-1 pr-14">
-            <div
-              className={cn('truncate text-sm text-white', !hasDescription && 'font-mono')}
-              data-testid="session-name"
-            >
-              {displayName}
-            </div>
-            {hasDescription && (
-              <div
-                className="mt-0.5 truncate font-mono text-[11px] text-white/40"
-                data-testid="session-technical-name"
-              >
-                {technicalName}
+          <div className={cn('min-w-0 flex-1', !editing && 'pr-14')}>
+            {editing ? (
+              <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <input
+                  ref={inputRef}
+                  value={draft}
+                  maxLength={200}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                  }}
+                  onBlur={commitEdit}
+                  placeholder="Add a description…"
+                  aria-label={`Description for session ${technicalName}`}
+                  data-testid="description-input"
+                  className="ring-primary/40 min-w-0 flex-1 rounded bg-white/10 px-1.5 py-1 text-sm text-white ring-1 outline-none"
+                />
+                <button
+                  onClick={commitEdit}
+                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60"
+                  aria-label="Save description"
+                  data-testid="save-description-button"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </button>
               </div>
+            ) : (
+              <>
+                <div
+                  className={cn('truncate text-sm text-white', !hasDescription && 'font-mono')}
+                  data-testid="session-name"
+                >
+                  {displayName}
+                </div>
+                {hasDescription && (
+                  <div
+                    className="mt-0.5 truncate font-mono text-[11px] text-white/40"
+                    data-testid="session-technical-name"
+                  >
+                    {technicalName}
+                  </div>
+                )}
+              </>
             )}
             <div
               className="mt-0.5 truncate text-[11px] text-white/40"

@@ -69,6 +69,44 @@ describe('SessionMiniCard', () => {
     });
   });
 
+  describe('inline description edit logic', () => {
+    // Mirrors commitEdit in SessionMiniCard: trims the draft and only fires the
+    // callback when the value actually changed vs the stored description.
+    function commit(current: string | undefined, draft: string) {
+      const next = draft.trim();
+      const changed = next !== (current ?? '');
+      return { next, changed };
+    }
+
+    it('saves a new description when set from empty', () => {
+      const r = commit(undefined, '  Fix login bug ');
+      expect(r.next).toBe('Fix login bug');
+      expect(r.changed).toBe(true);
+    });
+
+    it('updates an existing description', () => {
+      const r = commit('Old', 'New');
+      expect(r.next).toBe('New');
+      expect(r.changed).toBe(true);
+    });
+
+    it('clears the description when the draft is emptied', () => {
+      const r = commit('Old', '   ');
+      expect(r.next).toBe('');
+      expect(r.changed).toBe(true);
+    });
+
+    it('does not fire when the trimmed value is unchanged', () => {
+      const r = commit('Same', ' Same ');
+      expect(r.changed).toBe(false);
+    });
+
+    it('does not fire when empty stays empty', () => {
+      const r = commit(undefined, '   ');
+      expect(r.changed).toBe(false);
+    });
+  });
+
   describe('active state styling', () => {
     const activeStyles = {
       active: 'bg-white/10 border-orange-500/30 shadow-lg shadow-orange-500/10',

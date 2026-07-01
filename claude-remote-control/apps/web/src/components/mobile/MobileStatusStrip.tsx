@@ -32,6 +32,12 @@ export interface MobileStatusStripProps {
   onKillSession?: (machineId: string, sessionName: string) => Promise<boolean>;
   /** Archive session callback (from useSessionActions hook) */
   onArchiveSession?: (machineId: string, sessionName: string) => Promise<boolean>;
+  /** Edit-description callback (from useSessionActions hook) */
+  onUpdateDescription?: (
+    machineId: string,
+    sessionName: string,
+    description: string
+  ) => Promise<boolean>;
   /** Available machines for filtering */
   machines?: MobileMachine[];
   /** Currently selected machine filter */
@@ -59,6 +65,7 @@ export function MobileStatusStrip({
   onSessionKilled,
   onKillSession,
   onArchiveSession,
+  onUpdateDescription,
   machines = [],
   machineFilter,
   onSelectMachine,
@@ -93,6 +100,14 @@ export function MobileStatusStrip({
       }
     },
     [onArchiveSession, currentSession, onSessionKilled]
+  );
+
+  // Edit-description handler using shared hook
+  const handleEditDescription = useCallback(
+    (session: SessionWithMachine, description: string) => {
+      onUpdateDescription?.(session.machineId, session.name, description);
+    },
+    [onUpdateDescription]
   );
 
   // Close on Escape key
@@ -427,6 +442,11 @@ export function MobileStatusStrip({
                       }
                       onKill={() => handleKillSession(session)}
                       onArchive={() => handleArchiveSession(session)}
+                      onEditDescription={
+                        onUpdateDescription
+                          ? (description) => handleEditDescription(session, description)
+                          : undefined
+                      }
                     />
                   ))}
                 </div>

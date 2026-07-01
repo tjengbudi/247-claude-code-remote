@@ -972,6 +972,7 @@ export function HomeContent() {
         // Session actions from shared hook
         onKillSession={killSession}
         onArchiveSession={archiveSession}
+        onUpdateDescription={updateSessionDescription}
         // Filtering
         machines={sidebarMachines.map((m) => ({ id: m.id, name: m.name, color: m.color }))}
         machineFilter={machineFilter}
