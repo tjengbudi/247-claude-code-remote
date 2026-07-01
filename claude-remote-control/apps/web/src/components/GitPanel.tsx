@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check, FolderOpen, Trash2, GitFork } from 'lucide-react';
+import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check, FolderOpen, Trash2, GitFork, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GitRepoStatus, GitFileInfo, GitCommit, GitCommitWithDiff, GitWorktree } from '247-shared';
 import { GitHistory } from './GitHistory';
@@ -29,7 +29,7 @@ interface GitPanelProps {
   onLoadMore?: () => void;
   onToggleGraph: () => void;
   onFetchCommit: (hash: string) => Promise<GitCommitWithDiff | null>;
-  onFetchDiff: (hash: string, file: string) => Promise<string | null>;
+  onFetchDiff: (hash: string, file: string, signal?: AbortSignal) => Promise<string | null>;
   // Write actions (Story 6.4)
   onStage?: (repo: string, pathspecs: string[], all?: boolean) => Promise<boolean>;
   onUnstage?: (repo: string, pathspecs: string[], all?: boolean) => Promise<boolean>;
@@ -40,6 +40,8 @@ interface GitPanelProps {
   // Worktree actions (Story 6.6)
   onCreateWorktree?: (repo: string, branch: string, newBranch?: boolean) => Promise<{ path: string; branch: string } | null>;
   onRemoveWorktree?: (repo: string, path: string, opts?: { force?: boolean }) => Promise<{ ok: boolean; dirty?: boolean; liveSession?: boolean }>;
+  /** When false and repos is empty, show "Connecting…" instead of "No repos found" */
+  wsConnected?: boolean;
 }
 
 type TabView = 'status' | 'history';
@@ -135,9 +137,9 @@ function RepoGroup({
   if (!repo.status) return null;
 
   const { branch, files } = repo.status;
-  const branchName = branch.branchName || '(detached)';
+  const branchName = branch.branchName || branch.head || '(detached)';
 
-  const staged = files.filter(f => f.staged && f.indexStatus);
+  const staged = files.filter(f => f.staged);
   const changes = files.filter(f => !f.staged && f.worktreeStatus && f.worktreeStatus !== 'untracked' && f.worktreeStatus !== 'ignored');
   const untracked = files.filter(f => f.worktreeStatus === 'untracked');
 
@@ -598,10 +600,19 @@ export function GitPanel({
   onSwitchBranch,
   onCreateWorktree,
   onRemoveWorktree,
+  wsConnected = true,
 }: GitPanelProps) {
   const [activeTab, setActiveTab] = useState<TabView>('status');
 
   if (repos.length === 0) {
+    if (!wsConnected) {
+      return (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
+          <Loader2 className="h-8 w-8 animate-spin text-white/20" />
+          <p className="text-sm text-white/40">Connecting to agent…</p>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
         <FolderGit className="h-12 w-12 text-white/20" />

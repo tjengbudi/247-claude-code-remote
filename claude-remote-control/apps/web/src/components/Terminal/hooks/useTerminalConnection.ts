@@ -14,7 +14,7 @@ import {
   WS_PONG_TIMEOUT,
   WS_ACTIVITY_PAUSE,
 } from '../constants';
-import { buildWebSocketUrl } from '@/lib/utils';
+import { buildWebSocketUrl, isMixedContent } from '@/lib/utils';
 import { openAgentWebSocket } from '@/lib/ws-token';
 import { terminalLogger } from '@/lib/logger';
 import { writeClipboard } from '@/lib/clipboard';
@@ -501,6 +501,13 @@ export function useTerminalConnection({
       // Bind session to a worktree or subfolder (Story 6.5).
       if (workingDir) wsUrl += `&workingDir=${encodeURIComponent(workingDir)}`;
 
+      if (isMixedContent(agentUrl)) {
+        term.write('\r\n\x1b[31m* Cannot connect: dashboard is HTTPS but agent URL is HTTP.\x1b[0m\r\n');
+        term.write('\x1b[31m  Enable TLS on the agent, or access the dashboard over HTTP.\x1b[0m\r\n');
+        setConnectionState('disconnected');
+        return;
+      }
+
       ws = openAgentWebSocket(wsUrl, token);
       wsRef.current = ws;
       const currentTerm = term;
@@ -652,6 +659,9 @@ export function useTerminalConnection({
             `/terminal?project=${encodeURIComponent(project)}&session=${encodeURIComponent(sessionName)}`
           );
           if (environmentId) newWsUrl += `&environment=${encodeURIComponent(environmentId)}`;
+          if (planningProjectId) newWsUrl += `&planningProjectId=${encodeURIComponent(planningProjectId)}`;
+          if (owner) newWsUrl += `&owner=${encodeURIComponent(owner)}`;
+          if (workingDir) newWsUrl += `&workingDir=${encodeURIComponent(workingDir)}`;
 
           const newWs = openAgentWebSocket(newWsUrl, token);
           ws = newWs;

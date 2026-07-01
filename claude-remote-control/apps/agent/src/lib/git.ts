@@ -329,9 +329,9 @@ export function parseStatusPorcelain(stdout: string): {
         files.push({
           path: filePath,
           flags: { index: indexCode, worktree: worktreeCode },
-          indexStatus: xy[0] !== ' ' ? getStatusCode(xy[0]) : null,
-          worktreeStatus: xy[1] !== ' ' ? getStatusCode(xy[1]) : null,
-          staged: xy[0] !== ' ',
+          indexStatus: (xy[0] !== ' ' && xy[0] !== '.') ? getStatusCode(xy[0]) : null,
+          worktreeStatus: (xy[1] !== ' ' && xy[1] !== '.') ? getStatusCode(xy[1]) : null,
+          staged: xy[0] !== ' ' && xy[0] !== '.',
           origPath,
         });
         i++; // skip origPath record
@@ -350,9 +350,9 @@ export function parseStatusPorcelain(stdout: string): {
         files.push({
           path: filePath,
           flags: { index: indexCode, worktree: worktreeCode },
-          indexStatus: xy[0] !== ' ' ? getStatusCode(xy[0]) : null,
-          worktreeStatus: xy[1] !== ' ' ? getStatusCode(xy[1]) : null,
-          staged: xy[0] !== ' ',
+          indexStatus: (xy[0] !== ' ' && xy[0] !== '.') ? getStatusCode(xy[0]) : null,
+          worktreeStatus: (xy[1] !== ' ' && xy[1] !== '.') ? getStatusCode(xy[1]) : null,
+          staged: xy[0] !== ' ' && xy[0] !== '.',
         });
       }
     }

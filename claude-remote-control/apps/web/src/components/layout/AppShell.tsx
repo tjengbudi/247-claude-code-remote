@@ -135,6 +135,7 @@ export function AppShell({
         onOpenNotificationSettings={onOpenNotificationSettings}
         onOpenTokenCoverage={onOpenTokenCoverage}
         onOpenTasks={onOpenTasks}
+        onOpenGit={onOpenGit}
       />
 
       {/* Main Content - 3 Panel Layout */}

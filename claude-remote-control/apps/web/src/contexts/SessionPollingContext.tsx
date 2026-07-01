@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { SessionInfo, SessionWithMachine } from '@/lib/types';
-import { buildWebSocketUrl, buildApiUrl } from '@/lib/utils';
+import { buildWebSocketUrl, buildApiUrl, isMixedContent } from '@/lib/utils';
 import { openAgentWebSocket } from '@/lib/ws-token';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { wsLogger, pollingLogger, archivedLogger } from '@/lib/logger';
@@ -411,6 +411,33 @@ export function SessionPollingProvider({ children }: { children: ReactNode }) {
       }
 
       wsLogger.info(`Connecting to ${wsUrl} for machine ${machine.name}`);
+
+      if (isMixedContent(agentUrl)) {
+        wsLogger.warn(`Mixed-content blocked for ${machine.name}: page is HTTPS, agent is HTTP`);
+        setSessionsByMachine((prev) => {
+          const next = new Map(prev);
+          const existingData = next.get(machine.id);
+          if (existingData) {
+            next.set(machine.id, {
+              ...existingData,
+              wsConnected: false,
+              error: 'Cannot connect: dashboard is HTTPS but agent URL is HTTP. Enable TLS on the agent, or access the dashboard over HTTP.',
+            });
+          } else {
+            next.set(machine.id, {
+              machineId: machine.id,
+              machineName: machine.name,
+              agentUrl,
+              sessions: [],
+              lastFetch: Date.now(),
+              error: 'Cannot connect: dashboard is HTTPS but agent URL is HTTP. Enable TLS on the agent, or access the dashboard over HTTP.',
+              wsConnected: false,
+            });
+          }
+          return next;
+        });
+        return;
+      }
 
       try {
         // Reset hasOpened flag for this connection attempt (critical for handshake-reject detection)

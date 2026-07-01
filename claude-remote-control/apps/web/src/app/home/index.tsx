@@ -140,7 +140,7 @@ export function HomeContent() {
   const { createTask, updateTask, deleteTask } = useTaskActions(agentConnections, taskViewer);
 
   // Git actions hook for history operations
-  const { fetchLog, fetchCommit, fetchDiff, fetchGraph } = useGitActions(agentConnections, taskViewer);
+  const { fetchStatus, fetchLog, fetchCommit, fetchDiff, fetchGraph } = useGitActions(agentConnections, taskViewer);
 
   // Register sound notification callback for needs_attention status changes
   useEffect(() => {
@@ -404,16 +404,14 @@ export function HomeContent() {
   const handleOpenGit = useCallback(() => {
     setGitOpen(true);
     if (taskScope.machineId && taskScope.project) {
-      // Auto-select first discovered repo from git status map. The fetch is
-      // driven by the repo-change effect above, not here, so a repo switch and
-      // the initial open share one code path (no duplicate fetch).
+      fetchStatus(taskScope.machineId, taskScope.project);
       const gitRepos = getGitStatusForProject(taskScope.machineId, taskScope.project);
       const firstRepoPath = gitRepos.size > 0 ? Array.from(gitRepos.keys())[0] : null;
       if (firstRepoPath && !selectedGitRepo) {
         setSelectedGitRepo(firstRepoPath);
       }
     }
-  }, [taskScope.machineId, taskScope.project, selectedGitRepo, getGitStatusForProject]);
+  }, [taskScope.machineId, taskScope.project, selectedGitRepo, getGitStatusForProject, fetchStatus]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Callback handlers for new layout
@@ -629,6 +627,7 @@ export function HomeContent() {
                 graphCapped={gitGraphCapped}
                 loadingHistory={gitLoading}
                 graphLoading={gitGraphLoading}
+                wsConnected={isWsConnected(scopeMachineId)}
                 onSelectRepo={setSelectedGitRepo}
                 onLoadMore={gitHasMore && selectedGitRepo
                   ? () => handleLoadMore(scopeMachineId, selectedGitRepo)

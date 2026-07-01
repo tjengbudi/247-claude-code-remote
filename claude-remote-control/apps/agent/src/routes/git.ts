@@ -4,7 +4,7 @@
  */
 
 import { Router } from 'express';
-import { resolve, relative, isAbsolute, sep } from 'node:path';
+import { resolve, relative, isAbsolute, join, sep } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { discoverRepos, getRepoStatus, getLog, getCommit, getFileDiff, getGraph, stagePaths, unstagePaths, commit, push, pull, branch, listWorktrees, createWorktree, removeWorktree } from '../lib/git.js';
 import { broadcastGitStatus, tmuxSessionExists } from '../websocket-handlers.js';
@@ -105,8 +105,13 @@ export function createGitRoutes(): Router {
     }
 
     try {
+      // Resolve project name → absolute path when caller passes a bare name.
+      const projectCwd = isAbsolute(project)
+        ? project
+        : join(allowedRoot(), project);
+
       // Discover all git repos under the project directory
-      const discovery = await discoverRepos({ cwd: project });
+      const discovery = await discoverRepos({ cwd: projectCwd });
 
       // Fetch status for each repo
       const repos = await Promise.all(

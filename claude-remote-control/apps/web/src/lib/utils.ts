@@ -38,3 +38,18 @@ export function buildApiUrl(agentUrl: string, path: string): string {
   const cleanUrl = stripProtocol(agentUrl);
   return `${pageIsSecure() ? 'https' : 'http'}://${cleanUrl}${path}`;
 }
+
+/**
+ * Returns true when the page is served over HTTPS but the agent URL is plain HTTP.
+ * Browsers block these connections (mixed-content policy) — callers should surface
+ * an actionable error rather than letting the WebSocket silently fail.
+ *
+ * Always returns false in non-browser (SSR) contexts.
+ */
+export function isMixedContent(agentUrl: string): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!pageIsSecure()) return false;
+  const lower = agentUrl.toLowerCase();
+  // ws:// or http:// while page is https
+  return lower.startsWith('http://') || lower.startsWith('ws://');
+}

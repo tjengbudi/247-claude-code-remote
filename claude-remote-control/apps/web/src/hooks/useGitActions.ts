@@ -13,6 +13,7 @@ export interface GitViewer {
 }
 
 interface UseGitActionsReturn {
+  fetchStatus: (machineId: string, project: string) => Promise<void>;
   fetchLog: (
     machineId: string,
     repo: string,
@@ -102,6 +103,23 @@ export function useGitActions(
       return `${path}${qs ? `?${qs}` : ''}`;
     },
     [viewer]
+  );
+
+  const fetchStatus = useCallback(
+    async (machineId: string, project: string): Promise<void> => {
+      const machine = findMachine(machineId);
+      if (!machine) return;
+      try {
+        const url = buildApiUrl(
+          machine.url,
+          `/api/git/status?project=${encodeURIComponent(project)}`
+        );
+        await fetch(url);
+      } catch (_err) {
+        // silent — status is best-effort; WS push fills the panel
+      }
+    },
+    [findMachine]
   );
 
   const fetchLog = useCallback(
@@ -537,6 +555,7 @@ export function useGitActions(
   );
 
   return {
+    fetchStatus,
     fetchLog,
     fetchCommit,
     fetchDiff,

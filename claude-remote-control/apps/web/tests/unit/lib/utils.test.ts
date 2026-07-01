@@ -4,7 +4,7 @@
  * Tests for utility functions used across the application.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import { cn, stripProtocol, buildWebSocketUrl, buildApiUrl } from '@/lib/utils';
+import { cn, stripProtocol, buildWebSocketUrl, buildApiUrl, isMixedContent } from '@/lib/utils';
 
 describe('Utils', () => {
   describe('cn function', () => {
@@ -330,6 +330,54 @@ describe('Utils', () => {
       expect(buildApiUrl('http://192.168.1.50:4678', '/api/sessions')).toBe(
         'http://192.168.1.50:4678/api/sessions'
       );
+    });
+  });
+
+  describe('isMixedContent', () => {
+    const originalProtocol = window.location.protocol;
+
+    afterEach(() => {
+      Object.defineProperty(window, 'location', {
+        value: { ...window.location, protocol: originalProtocol },
+        writable: true,
+      });
+    });
+
+    function setPageProtocol(protocol: 'http:' | 'https:') {
+      Object.defineProperty(window, 'location', {
+        value: { ...window.location, protocol },
+        writable: true,
+      });
+    }
+
+    it('returns false when page is http (no mixed content possible)', () => {
+      setPageProtocol('http:');
+      expect(isMixedContent('http://192.168.1.50:4678')).toBe(false);
+    });
+
+    it('returns false when page is https and agent is https', () => {
+      setPageProtocol('https:');
+      expect(isMixedContent('https://agent.example.com:4678')).toBe(false);
+    });
+
+    it('returns false when page is https and agent URL has no protocol (treated as https by buildWebSocketUrl)', () => {
+      setPageProtocol('https:');
+      expect(isMixedContent('agent.example.com:4678')).toBe(false);
+    });
+
+    it('returns true when page is https and agent URL is http://', () => {
+      setPageProtocol('https:');
+      expect(isMixedContent('http://192.168.1.50:4678')).toBe(true);
+    });
+
+    it('returns true when page is https and agent URL is ws://', () => {
+      setPageProtocol('https:');
+      expect(isMixedContent('ws://192.168.1.50:4678')).toBe(true);
+    });
+
+    it('is case-insensitive on the protocol prefix', () => {
+      setPageProtocol('https:');
+      expect(isMixedContent('HTTP://192.168.1.50:4678')).toBe(true);
     });
   });
 });
