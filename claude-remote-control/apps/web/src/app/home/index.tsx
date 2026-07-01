@@ -58,14 +58,18 @@ function mapSessionStatus(session: SessionWithMachine): SessionStatus {
 export function HomeContent() {
   const isMobile = useIsMobile();
 
-  // Current web user id — tags newly-created sessions so the agent can isolate
-  // each user's sessions (per-user view isolation).
+  // Current web user id + owner flag — tags newly-created sessions so the agent
+  // can isolate each user's sessions (per-user view isolation).
   const { getSession } = useAuth();
   const [currentUserId, setCurrentUserId] = useState<string | undefined>(undefined);
+  const [currentUserIsOwner, setCurrentUserIsOwner] = useState<boolean>(false);
   useEffect(() => {
     let cancelled = false;
     getSession().then((session) => {
-      if (!cancelled) setCurrentUserId(session.data.user?.id ?? undefined);
+      if (!cancelled) {
+        setCurrentUserId(session.data.user?.id ?? undefined);
+        setCurrentUserIsOwner(session.isOwner);
+      }
     });
     return () => {
       cancelled = true;
@@ -119,8 +123,12 @@ export function HomeContent() {
   } = useHomeState();
 
   // Shared session actions hook (used by both desktop SessionListPanel and mobile MobileStatusStrip)
+  const sessionViewer = useMemo(
+    () => ({ ownerId: currentUserId ?? null, isOwner: currentUserIsOwner }),
+    [currentUserId, currentUserIsOwner]
+  );
   const { killSession, archiveSession, acknowledgeSession, updateSessionDescription } =
-    useSessionActions(agentConnections);
+    useSessionActions(agentConnections, sessionViewer);
 
   // Get session count per agent for the header
   const {
@@ -135,8 +143,8 @@ export function HomeContent() {
 
   // Task actions (create/update/delete) — owner identity threaded for isolation.
   const taskViewer = useMemo(
-    () => ({ ownerId: currentUserId ?? null, isOwner: false }),
-    [currentUserId]
+    () => ({ ownerId: currentUserId ?? null, isOwner: currentUserIsOwner }),
+    [currentUserId, currentUserIsOwner]
   );
   const { createTask, updateTask, deleteTask } = useTaskActions(agentConnections, taskViewer);
 

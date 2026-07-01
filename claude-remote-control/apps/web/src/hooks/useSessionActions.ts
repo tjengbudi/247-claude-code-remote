@@ -3,7 +3,13 @@
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/lib/utils';
+import { viewerParams } from '@/contexts/SessionPollingContext';
 import type { AgentConnection } from './useAgentConnections';
+
+export interface Viewer {
+  ownerId: string | null;
+  isOwner: boolean;
+}
 
 export interface UseSessionActionsReturn {
   /** Kill (terminate) a session */
@@ -24,12 +30,23 @@ export interface UseSessionActionsReturn {
  * Shared hook for session actions (kill, archive, acknowledge).
  * Used by both mobile (MobileStatusStrip) and desktop (SessionListPanel via home/index.tsx).
  */
-export function useSessionActions(agentConnections: AgentConnection[]): UseSessionActionsReturn {
+export function useSessionActions(
+  agentConnections: AgentConnection[],
+  viewer: Viewer
+): UseSessionActionsReturn {
   const findMachine = useCallback(
     (machineId: string) => {
       return agentConnections.find((c) => c.id === machineId);
     },
     [agentConnections]
+  );
+
+  const withViewer = useCallback(
+    (path: string) => {
+      const qs = viewerParams(viewer);
+      return `${path}${qs ? `?${qs}` : ''}`;
+    },
+    [viewer]
   );
 
   const killSession = useCallback(
@@ -42,7 +59,7 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
 
       try {
         const response = await fetch(
-          buildApiUrl(machine.url, `/api/sessions/${encodeURIComponent(sessionName)}`),
+          buildApiUrl(machine.url, withViewer(`/api/sessions/${encodeURIComponent(sessionName)}`)),
           { method: 'DELETE' }
         );
 
@@ -58,7 +75,7 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
         return false;
       }
     },
-    [findMachine]
+    [findMachine, withViewer]
   );
 
   const archiveSession = useCallback(
@@ -71,7 +88,10 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
 
       try {
         const response = await fetch(
-          buildApiUrl(machine.url, `/api/sessions/${encodeURIComponent(sessionName)}/archive`),
+          buildApiUrl(
+            machine.url,
+            withViewer(`/api/sessions/${encodeURIComponent(sessionName)}/archive`)
+          ),
           { method: 'POST' }
         );
 
@@ -87,7 +107,7 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
         return false;
       }
     },
-    [findMachine]
+    [findMachine, withViewer]
   );
 
   const acknowledgeSession = useCallback(
@@ -99,7 +119,10 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
 
       try {
         const response = await fetch(
-          buildApiUrl(machine.url, `/api/sessions/${encodeURIComponent(sessionName)}/acknowledge`),
+          buildApiUrl(
+            machine.url,
+            withViewer(`/api/sessions/${encodeURIComponent(sessionName)}/acknowledge`)
+          ),
           { method: 'POST' }
         );
         return response.ok;
@@ -108,7 +131,7 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
         return false;
       }
     },
-    [findMachine]
+    [findMachine, withViewer]
   );
 
   const updateSessionDescription = useCallback(
@@ -121,7 +144,7 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
 
       try {
         const response = await fetch(
-          buildApiUrl(machine.url, `/api/sessions/${encodeURIComponent(sessionName)}`),
+          buildApiUrl(machine.url, withViewer(`/api/sessions/${encodeURIComponent(sessionName)}`)),
           {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
@@ -141,7 +164,7 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
         return false;
       }
     },
-    [findMachine]
+    [findMachine, withViewer]
   );
 
   return { killSession, archiveSession, acknowledgeSession, updateSessionDescription };
