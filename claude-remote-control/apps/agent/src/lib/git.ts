@@ -205,6 +205,25 @@ export async function discoverRepos(
     return false;
   }
 
+  // Check if cwd itself is a git repo (scan() only checks children, not the root)
+  if (await hasDotGit(resolvedRoot)) {
+    const gitFile = join(resolvedRoot, '.git');
+    let gitStat: Awaited<ReturnType<typeof stat>> | null = null;
+    try { gitStat = await stat(gitFile); } catch { /* ignore */ }
+    if (gitStat?.isFile()) {
+      const content = (await readFile(gitFile, 'utf8')).trim();
+      const match = content.match(/^gitdir:\s*(.+)$/);
+      if (match) {
+        const gitdir = resolve(resolvedRoot, match[1]);
+        const mainWorktree = resolve(gitdir, '../../..');
+        foundPaths.add(resolvedRoot);
+        worktrees.set(resolvedRoot, { mainWorktree, detached: false });
+      }
+    } else {
+      foundPaths.add(resolvedRoot);
+    }
+  }
+
   const capped = await scan(resolvedRoot, 0);
 
   const repos = Array.from(foundPaths).map((path) => ({
