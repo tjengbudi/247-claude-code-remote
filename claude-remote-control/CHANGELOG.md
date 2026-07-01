@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.47.0] - 2026-07-01
+
+### Features
+
+- **git**: Story 6.7 — git path-boundary hardening (4e58fac)
+- **git**: Story 6.6 — create and remove worktrees from the UI (4f75c96)
+- **session**: bind session to worktree or subfolder (Story 6.5) (8d60313)
+- **git**: Story 6.4 — write actions: stage/commit/push/pull/branch + code-review hardening (8326550)
+
+### Bug Fixes
+
+- **web**: hydration errors + git/task buttons on mobile (8d92128)
+- **git**: discoverRepos misses cwd itself when project root is a git repo (03f1f22)
+- **hotfix**: mixed-content guard, reconnect URL params, git panel state, AbortSignal (d171324)
+
 ## [2.46.0] - 2026-06-29
 
 ### Features
