@@ -230,7 +230,7 @@ export function createSessionRoutes(): Router {
   });
 
   // Set or clear a session's human-readable description
-  router.patch('/:sessionName', (req, res) => {
+  router.patch('/:sessionName', async (req, res) => {
     const { sessionName } = req.params;
 
     if (!/^[\w-]+$/.test(sessionName)) {
@@ -239,10 +239,27 @@ export function createSessionRoutes(): Router {
 
     // View isolation: don't let a user edit a session they can't see.
     const viewer = parseViewer(req);
-    const existing = sessionsDb.getSession(sessionName);
+    let existing = sessionsDb.getSession(sessionName);
+
+    // Session visible in the UI (from tmux) but not yet in DB — auto-register
+    // it now so description can be saved. Tag with the requesting viewer's
+    // identity so ownership is consistent with how web-created sessions work.
     if (!existing) {
-      return res.status(404).json({ error: 'Session not found' });
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+      try {
+        await execAsync(`tmux has-session -t "${sessionName}" 2>/dev/null`);
+        const [project] = sessionName.split('--');
+        existing = sessionsDb.upsertSession(sessionName, {
+          project,
+          ownerId: viewer.ownerId,
+        });
+      } catch {
+        return res.status(404).json({ error: 'Session not found' });
+      }
     }
+
     if (!sessionsDb.isSessionVisible(existing, viewer)) {
       return res.status(404).json({ error: 'Session not found' });
     }
