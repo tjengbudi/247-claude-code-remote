@@ -1,6 +1,6 @@
 {
   "name": "247-web",
-  "version": "2.47.1",
+  "version": "2.48.0",
   "private": true,
   "scripts": {
     "db:generate": "drizzle-kit generate",
