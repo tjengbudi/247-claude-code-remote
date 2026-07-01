@@ -218,6 +218,7 @@ export function HomeContent() {
         model: session.model,
         cost: session.costUsd,
         machineId: session.machineId,
+        description: session.description,
       })),
     [allSessions]
   );
