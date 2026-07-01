@@ -531,6 +531,7 @@ export function AgentConnectionSettings({
         <>
           {/* Backdrop */}
           <motion.div
+            key="acs-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -540,6 +541,7 @@ export function AgentConnectionSettings({
 
           {/* Slide-over panel */}
           <motion.div
+            key="acs-panel"
             variants={slideVariants}
             initial="hidden"
             animate="visible"

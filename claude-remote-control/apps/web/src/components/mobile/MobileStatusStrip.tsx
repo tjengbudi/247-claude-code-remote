@@ -298,6 +298,7 @@ export function MobileStatusStrip({
           <>
             {/* Backdrop */}
             <motion.div
+              key="strip-backdrop"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -308,6 +309,7 @@ export function MobileStatusStrip({
 
             {/* Dropdown Panel */}
             <motion.div
+              key="strip-panel"
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}

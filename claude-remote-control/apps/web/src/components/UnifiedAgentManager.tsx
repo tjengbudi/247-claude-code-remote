@@ -586,6 +586,7 @@ export function UnifiedAgentManager({
       {open && (
         <>
           <motion.div
+            key="uam-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -594,6 +595,7 @@ export function UnifiedAgentManager({
           />
 
           <motion.div
+            key="uam-panel"
             variants={slideVariants}
             initial="hidden"
             animate="visible"
@@ -722,6 +724,7 @@ export function UnifiedAgentManager({
 
       {/* Edit Agent Modal */}
       <EditAgentModal
+        key="uam-edit-modal"
         open={!!editingAgent}
         onClose={() => setEditingAgent(null)}
         agentId={editingAgent?.id || ''}

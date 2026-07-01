@@ -72,6 +72,7 @@ export function EditAgentModal({
         <>
           {/* Backdrop */}
           <motion.div
+            key="edit-agent-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -81,6 +82,7 @@ export function EditAgentModal({
 
           {/* Modal */}
           <motion.div
+            key="edit-agent-modal"
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
