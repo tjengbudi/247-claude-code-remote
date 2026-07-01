@@ -119,7 +119,8 @@ export function HomeContent() {
   } = useHomeState();
 
   // Shared session actions hook (used by both desktop SessionListPanel and mobile MobileStatusStrip)
-  const { killSession, archiveSession, acknowledgeSession } = useSessionActions(agentConnections);
+  const { killSession, archiveSession, acknowledgeSession, updateSessionDescription } =
+    useSessionActions(agentConnections);
 
   // Get session count per agent for the header
   const {
@@ -635,6 +636,16 @@ export function HomeContent() {
     [archiveSession, handleSessionArchived]
   );
 
+  // Handler pour éditer la description depuis SessionListPanel (uses shared hook)
+  const handleEditDescriptionFromList = useCallback(
+    (item: SessionListItem, description: string) => {
+      if (item.machineId) {
+        updateSessionDescription(item.machineId, item.name, description);
+      }
+    },
+    [updateSessionDescription]
+  );
+
   // Create agent status and session count maps for UnifiedAgentManager
   const agentStatuses = new Map<string, 'online' | 'offline' | 'connecting'>();
   const sessionCountsMap = new Map<string, number>();
@@ -855,6 +866,7 @@ export function HomeContent() {
           onNewSession={() => setNewSessionOpen(true)}
           onKillSession={handleKillSessionFromList}
           onArchiveSession={handleArchiveSessionFromList}
+          onEditDescription={handleEditDescriptionFromList}
           // Header props
           currentMachineName={currentMachine?.name}
           currentProjectName={selectedSession?.project}
@@ -885,6 +897,7 @@ export function HomeContent() {
               owner={currentUserId}
               workingDir={selectedSession.workingDir}
               gitCwdContext={selectedSession.gitCwdContext}
+              description={selectedSession.description}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center">
@@ -990,6 +1003,7 @@ export function HomeContent() {
             isMobile={true}
             owner={currentUserId}
             workingDir={selectedSession.workingDir}
+            description={selectedSession.description}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center">

@@ -25,6 +25,9 @@ export interface DbSession {
   // When set, session's tmux cwd is this absolute path instead of project root.
   // Must be a worktree or subfolder within the project's allowed root.
   working_dir: string | null;
+  // Human-readable label (v21). NULL = no description; UI falls back to `name`.
+  // Purely additive metadata — never affects tmux identity.
+  description: string | null;
   // Per-user view isolation (v18). NULL = untagged (legacy/CLI/hook-created);
   // such rows are visible only to the dashboard owner account.
   owner_id: string | null;
@@ -86,13 +89,16 @@ export interface UpsertSessionInput {
   ownerId?: string | null;
   // Bound sub-path (v20). NULL = project root; set when binding a worktree/subfolder.
   workingDir?: string | null;
+  // Human-readable label (v21). Omit to preserve stored value (COALESCE);
+  // pass null explicitly to clear it, empty string is normalized to null by callers.
+  description?: string | null;
 }
 
 // ============================================================================
 // SQL Schema Definitions (v19 - Per-project tasks)
 // ============================================================================
 
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 21;
 
 export const CREATE_TABLES_SQL = `
 -- Sessions: current state of terminal sessions with status tracking
@@ -113,7 +119,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- Per-user view isolation (v18); NULL = untagged (owner-only visibility)
   owner_id TEXT,
   -- Bound sub-path (v20); NULL = project root (default behavior)
-  working_dir TEXT
+  working_dir TEXT,
+  -- Human-readable label (v21); NULL = no description (UI falls back to name)
+  description TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);

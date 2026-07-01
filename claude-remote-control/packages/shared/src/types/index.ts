@@ -85,6 +85,8 @@ export interface WSSessionInfo {
   workingDir?: string;
   // Classified git context for the bound path (computed at list-time, never stored)
   gitCwdContext?: GitCwdContext;
+  // Human-readable label (v21): shown in place of the technical tmux name, or undefined = no description
+  description?: string;
 }
 
 // ============================================================================

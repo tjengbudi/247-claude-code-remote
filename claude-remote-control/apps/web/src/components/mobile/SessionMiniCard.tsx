@@ -30,7 +30,10 @@ export function SessionMiniCard({
   const [isKilling, setIsKilling] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
 
-  const displayName = session.name.split('--')[1] || session.name;
+  const technicalName = session.name.split('--')[1] || session.name;
+  // Human-readable label wins as the title; technical name drops to a subtitle.
+  const displayName = session.description || technicalName;
+  const hasDescription = Boolean(session.description);
 
   const handleKillClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -126,9 +129,20 @@ export function SessionMiniCard({
           />
 
           <div className="min-w-0 flex-1 pr-14">
-            <div className="truncate font-mono text-sm text-white" data-testid="session-name">
+            <div
+              className={cn('truncate text-sm text-white', !hasDescription && 'font-mono')}
+              data-testid="session-name"
+            >
               {displayName}
             </div>
+            {hasDescription && (
+              <div
+                className="mt-0.5 truncate font-mono text-[11px] text-white/40"
+                data-testid="session-technical-name"
+              >
+                {technicalName}
+              </div>
+            )}
             <div
               className="mt-0.5 truncate text-[11px] text-white/40"
               data-testid="session-project"

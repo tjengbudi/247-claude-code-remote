@@ -32,6 +32,7 @@ export interface AppShellProps {
   onNewSession?: () => void;
   onKillSession?: (session: SessionListItem) => void;
   onArchiveSession?: (session: SessionListItem) => void;
+  onEditDescription?: (session: SessionListItem, description: string) => void;
   // Header props
   currentMachineName?: string;
   currentProjectName?: string;
@@ -83,6 +84,7 @@ export function AppShell({
   onNewSession,
   onKillSession,
   onArchiveSession,
+  onEditDescription,
   // Header props
   currentMachineName,
   currentProjectName,
@@ -178,6 +180,7 @@ export function AppShell({
             onNewSession={onNewSession}
             onKillSession={onKillSession}
             onArchiveSession={onArchiveSession}
+            onEditDescription={onEditDescription}
           />
         </div>
 

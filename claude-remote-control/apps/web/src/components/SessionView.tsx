@@ -33,6 +33,8 @@ interface SessionViewProps {
   workingDir?: string;
   /** Classified git context for bound path — kind, branch, boundPath (Story 6.5) */
   gitCwdContext?: GitCwdContext;
+  /** Human-readable label supplied at create time (v21), sent to the agent on the create WS. */
+  description?: string;
 }
 
 /**
@@ -53,6 +55,7 @@ export function SessionView({
   owner,
   workingDir,
   gitCwdContext,
+  description,
 }: SessionViewProps) {
   // Connection state tracked but not displayed (shown in MinimalSessionHeader via Terminal)
   const [_isConnected, setIsConnected] = useState(false);
@@ -92,6 +95,7 @@ export function SessionView({
       owner={owner}
       workingDir={workingDir}
       gitCwdContext={gitCwdContext}
+      description={description}
       // StatusLine metrics
       model={sessionInfo?.model}
       costUsd={sessionInfo?.costUsd}

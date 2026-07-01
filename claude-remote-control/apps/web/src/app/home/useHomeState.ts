@@ -189,13 +189,14 @@ export function useHomeState() {
   );
 
   const handleStartSession = useCallback(
-    (machineId: string, project: string, environmentId?: string) => {
+    (machineId: string, project: string, environmentId?: string, description?: string) => {
       const newSessionName = `${project}--new`;
       setSelectedSession({
         machineId,
         sessionName: newSessionName,
         project,
         environmentId,
+        description,
       });
       setNewSessionOpen(false);
 

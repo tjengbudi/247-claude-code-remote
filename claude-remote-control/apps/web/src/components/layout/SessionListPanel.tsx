@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, Archive, Trash2, Clock, X } from 'lucide-react';
+import { Search, Plus, Archive, Trash2, Clock, X, Pencil, Check } from 'lucide-react';
 import { format, isToday, isYesterday, startOfDay } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { variants, stagger, interactive } from '@/lib/animations';
@@ -22,6 +22,8 @@ export interface SessionListItem {
   model?: string;
   cost?: number;
   machineId?: string;
+  /** Human-readable label; shown in place of the technical name when present. */
+  description?: string;
 }
 
 interface DateGroup {
@@ -37,6 +39,8 @@ interface SessionListPanelProps {
   onNewSession?: () => void;
   onKillSession?: (session: SessionListItem) => void;
   onArchiveSession?: (session: SessionListItem) => void;
+  /** Save a new description (empty string clears it) for the given session. */
+  onEditDescription?: (session: SessionListItem, description: string) => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -130,10 +134,51 @@ interface SessionCardProps {
   onClick?: () => void;
   onKill?: () => void;
   onArchive?: () => void;
+  onEditDescription?: (description: string) => void;
 }
 
-function SessionCard({ session, selected, onClick, onKill, onArchive }: SessionCardProps) {
+function SessionCard({
+  session,
+  selected,
+  onClick,
+  onKill,
+  onArchive,
+  onEditDescription,
+}: SessionCardProps) {
   const [showActions, setShowActions] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(session.description ?? '');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const startEditing = () => {
+    setDraft(session.description ?? '');
+    setEditing(true);
+  };
+
+  const commitEdit = () => {
+    const next = draft.trim();
+    if (next !== (session.description ?? '')) {
+      onEditDescription?.(next);
+    }
+    setEditing(false);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setDraft(session.description ?? '');
+  };
+
+  // Human-readable label wins; the technical name is shown as a subtitle when a
+  // description is present, so the identifier is never lost.
+  const hasDescription = Boolean(session.description);
+  const title = session.description ?? session.name;
 
   return (
     <motion.div
@@ -162,13 +207,47 @@ function SessionCard({ session, selected, onClick, onKill, onArchive }: SessionC
 
         {/* Content */}
         <div className="min-w-0 flex-1">
-          {/* Name and badge */}
-          <div className="mb-0.5 flex items-center gap-2">
-            <span className="truncate font-medium text-white/90">{session.name}</span>
-            {session.status === 'needs_attention' && (
-              <StatusBadge status={session.status} size="sm" showDot={false} />
-            )}
-          </div>
+          {/* Title (description or name) + badge, or inline editor */}
+          {editing ? (
+            <div className="mb-0.5 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              <input
+                ref={inputRef}
+                value={draft}
+                maxLength={200}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+                  if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                }}
+                onBlur={commitEdit}
+                placeholder="Add a description…"
+                aria-label={`Description for session ${session.name}`}
+                className="min-w-0 flex-1 rounded bg-white/10 px-1.5 py-0.5 text-sm text-white/90 outline-none ring-1 ring-primary/40"
+              />
+              <button
+                onClick={commitEdit}
+                className="rounded-md p-1 text-white/40 hover:bg-white/10 hover:text-white/70"
+                title="Save description"
+                aria-label="Save description"
+              >
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="mb-0.5 flex items-center gap-2">
+                <span className="truncate font-medium text-white/90">{title}</span>
+                {session.status === 'needs_attention' && (
+                  <StatusBadge status={session.status} size="sm" showDot={false} />
+                )}
+              </div>
+              {hasDescription && (
+                <div className="mb-0.5 truncate font-mono text-xs text-white/40">
+                  {session.name}
+                </div>
+              )}
+            </>
+          )}
 
           {/* Meta info */}
           <div className="flex items-center gap-2 text-xs text-white/40">
@@ -189,7 +268,7 @@ function SessionCard({ session, selected, onClick, onKill, onArchive }: SessionC
 
         {/* Actions on hover */}
         <AnimatePresence>
-          {showActions && (onKill || onArchive) && (
+          {showActions && !editing && (onKill || onArchive || onEditDescription) && (
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -198,6 +277,16 @@ function SessionCard({ session, selected, onClick, onKill, onArchive }: SessionC
               className="flex items-center gap-1"
               onClick={(e) => e.stopPropagation()}
             >
+              {onEditDescription && (
+                <button
+                  onClick={startEditing}
+                  className="rounded-md p-2 text-white/40 hover:bg-white/10 hover:text-white/70"
+                  title="Edit description"
+                  aria-label={`Edit description for session ${session.name}`}
+                >
+                  <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              )}
               {onArchive && (
                 <button
                   onClick={onArchive}
@@ -236,9 +325,17 @@ interface DateGroupProps {
   onSelect?: (session: SessionListItem) => void;
   onKill?: (session: SessionListItem) => void;
   onArchive?: (session: SessionListItem) => void;
+  onEditDescription?: (session: SessionListItem, description: string) => void;
 }
 
-function DateGroupSection({ group, selectedId, onSelect, onKill, onArchive }: DateGroupProps) {
+function DateGroupSection({
+  group,
+  selectedId,
+  onSelect,
+  onKill,
+  onArchive,
+  onEditDescription,
+}: DateGroupProps) {
   return (
     <div className="mb-2">
       {/* Date header */}
@@ -259,6 +356,9 @@ function DateGroupSection({ group, selectedId, onSelect, onKill, onArchive }: Da
             onClick={() => onSelect?.(session)}
             onKill={onKill ? () => onKill(session) : undefined}
             onArchive={onArchive ? () => onArchive(session) : undefined}
+            onEditDescription={
+              onEditDescription ? (description) => onEditDescription(session, description) : undefined
+            }
           />
         ))}
       </motion.div>
@@ -277,6 +377,7 @@ export function SessionListPanel({
   onNewSession,
   onKillSession,
   onArchiveSession,
+  onEditDescription,
 }: SessionListPanelProps) {
   const [search, setSearch] = useState('');
 
@@ -285,7 +386,10 @@ export function SessionListPanel({
     if (!search.trim()) return sessions;
     const query = search.toLowerCase();
     return sessions.filter(
-      (s) => s.name.toLowerCase().includes(query) || s.project.toLowerCase().includes(query)
+      (s) =>
+        s.name.toLowerCase().includes(query) ||
+        s.project.toLowerCase().includes(query) ||
+        (s.description?.toLowerCase().includes(query) ?? false)
     );
   }, [search, sessions]);
 
@@ -327,6 +431,7 @@ export function SessionListPanel({
               onSelect={onSelectSession}
               onKill={onKillSession}
               onArchive={onArchiveSession}
+              onEditDescription={onEditDescription}
             />
           ))
         )}

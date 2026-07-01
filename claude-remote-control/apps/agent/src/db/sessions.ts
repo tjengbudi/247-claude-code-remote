@@ -82,13 +82,13 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
       name, project, last_event,
       last_activity, created_at, updated_at,
       status, status_source, attention_reason, last_status_change,
-      owner_id, working_dir
+      owner_id, working_dir, description
     )
     VALUES (
       @name, @project, @lastEvent,
       @lastActivity, @createdAt, @updatedAt,
       @status, @statusSource, @attentionReason, @lastStatusChange,
-      @ownerId, @workingDir
+      @ownerId, @workingDir, @description
     )
     ON CONFLICT(name) DO UPDATE SET
       last_event = COALESCE(@lastEvent, last_event),
@@ -102,7 +102,10 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
       owner_id = COALESCE(owner_id, @ownerId),
       -- working_dir: COALESCE preserves stored binding when caller omits workingDir.
       -- Use clearSessionWorkingDir() to explicitly reset to NULL.
-      working_dir = COALESCE(@workingDir, working_dir)
+      working_dir = COALESCE(@workingDir, working_dir),
+      -- description: COALESCE preserves stored label when caller omits description.
+      -- The description route passes null explicitly to clear it.
+      description = COALESCE(@description, description)
   `);
 
   stmt.run({
@@ -118,6 +121,7 @@ export function upsertSession(name: string, input: UpsertSessionInput): DbSessio
     lastStatusChange,
     ownerId: input.ownerId ?? null,
     workingDir: input.workingDir ?? null,
+    description: input.description ?? null,
   });
 
   return getSession(name)!;
@@ -199,4 +203,22 @@ export function reconcileWithTmux(activeTmuxSessions: Set<string>): void {
 export function clearSessionWorkingDir(name: string): void {
   const db = getDatabase();
   db.prepare('UPDATE sessions SET working_dir = NULL WHERE name = @name').run({ name });
+}
+
+/**
+ * Set (or clear) a session's human-readable description.
+ * Pass null to clear. Unlike upsertSession (which COALESCEs description to
+ * preserve on omission), this always writes the given value, so it can reset
+ * the label to NULL. Returns the updated session, or null if it doesn't exist.
+ */
+export function setSessionDescription(name: string, description: string | null): DbSession | null {
+  const db = getDatabase();
+  const existing = getSession(name);
+  if (!existing) {
+    return null;
+  }
+  db.prepare(
+    'UPDATE sessions SET description = @description, updated_at = @updatedAt WHERE name = @name'
+  ).run({ name, description, updatedAt: Date.now() });
+  return getSession(name);
 }

@@ -12,6 +12,12 @@ export interface UseSessionActionsReturn {
   archiveSession: (machineId: string, sessionName: string) => Promise<boolean>;
   /** Acknowledge a session (clear needs_attention status) */
   acknowledgeSession: (machineId: string, sessionName: string) => Promise<boolean>;
+  /** Set or clear a session's human-readable description (empty string clears it) */
+  updateSessionDescription: (
+    machineId: string,
+    sessionName: string,
+    description: string
+  ) => Promise<boolean>;
 }
 
 /**
@@ -105,5 +111,38 @@ export function useSessionActions(agentConnections: AgentConnection[]): UseSessi
     [findMachine]
   );
 
-  return { killSession, archiveSession, acknowledgeSession };
+  const updateSessionDescription = useCallback(
+    async (machineId: string, sessionName: string, description: string): Promise<boolean> => {
+      const machine = findMachine(machineId);
+      if (!machine) {
+        toast.error('Agent not found');
+        return false;
+      }
+
+      try {
+        const response = await fetch(
+          buildApiUrl(machine.url, `/api/sessions/${encodeURIComponent(sessionName)}`),
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description }),
+          }
+        );
+
+        if (response.ok) {
+          toast.success('Description saved');
+          return true;
+        }
+        toast.error('Failed to save description');
+        return false;
+      } catch (err) {
+        console.error('Failed to update description:', err);
+        toast.error('Could not connect to agent');
+        return false;
+      }
+    },
+    [findMachine]
+  );
+
+  return { killSession, archiveSession, acknowledgeSession, updateSessionDescription };
 }

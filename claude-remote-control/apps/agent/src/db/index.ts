@@ -109,6 +109,9 @@ function runMigrations(database: Database.Database): void {
       if (currentVersion < 20) {
         migrateToV20(database);
       }
+      if (currentVersion < 21) {
+        migrateToV21(database);
+      }
     }
 
     // Record the new version
@@ -366,6 +369,41 @@ function migrateToV20(database: Database.Database): void {
   }
 
   console.log('[DB] v20 migration: Complete');
+}
+
+/**
+ * Migration to v21: Human-readable session description
+ * Additive — adds a nullable description TEXT column to sessions so a session
+ * can carry a human-readable label alongside its technical tmux name. NULL = no
+ * description (UI falls back to name). Follows the v20 additive-column pattern
+ * (PRAGMA guard → ALTER → re-verify). Zero impact on tmux identity.
+ */
+function migrateToV21(database: Database.Database): void {
+  console.log('[DB] v21 migration: Adding session description');
+
+  const getColumnNames = (): Set<string> => {
+    const columns = database.pragma('table_info(sessions)') as Array<{ name: string }>;
+    return new Set(columns.map((c) => c.name));
+  };
+
+  if (!getColumnNames().has('description')) {
+    console.log('[DB] v21 migration: Adding column description');
+    try {
+      database.exec('ALTER TABLE sessions ADD COLUMN description TEXT');
+    } catch (err) {
+      // Only swallow "duplicate column name" — rethrow other failures (disk full, locked, etc.)
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('duplicate column name')) throw err;
+      console.log('[DB] v21 migration: Column description already exists, continuing...');
+    }
+  }
+
+  // Verify the column was added
+  if (!getColumnNames().has('description')) {
+    throw new Error('[DB] v21 migration failed: Missing column: description');
+  }
+
+  console.log('[DB] v21 migration: Complete');
 }
 
 /**

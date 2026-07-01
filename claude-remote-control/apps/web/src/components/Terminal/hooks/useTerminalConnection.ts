@@ -41,6 +41,8 @@ interface UseTerminalConnectionProps {
   owner?: string;
   /** Bound sub-path (worktree or subfolder) — session's cwd will be this instead of project root (Story 6.5) */
   workingDir?: string;
+  /** Human-readable label supplied at create time (v21), sent as a WS query param on create. */
+  description?: string;
 }
 
 export function useTerminalConnection({
@@ -56,6 +58,7 @@ export function useTerminalConnection({
   isMobile = false,
   token,
   owner,
+  description,
 }: UseTerminalConnectionProps) {
   const [connected, setConnected] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -500,6 +503,8 @@ export function useTerminalConnection({
       if (owner) wsUrl += `&owner=${encodeURIComponent(owner)}`;
       // Bind session to a worktree or subfolder (Story 6.5).
       if (workingDir) wsUrl += `&workingDir=${encodeURIComponent(workingDir)}`;
+      // Human-readable label supplied at create time (v21) — only meaningful on create.
+      if (isNewSession && description) wsUrl += `&description=${encodeURIComponent(description)}`;
 
       if (isMixedContent(agentUrl)) {
         term.write('\r\n\x1b[31m* Cannot connect: dashboard is HTTPS but agent URL is HTTP.\x1b[0m\r\n');

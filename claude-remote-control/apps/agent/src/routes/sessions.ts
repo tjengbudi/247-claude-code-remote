@@ -14,6 +14,9 @@ import {
   broadcastStatusUpdate,
 } from '../websocket-handlers.js';
 
+/** Max stored length for a session description (chars). Longer input is truncated. */
+const MAX_DESCRIPTION_LENGTH = 200;
+
 /**
  * Parse the viewer identity (owner / isOwner) the web client appends to agent
  * HTTP requests as query params, for per-user view isolation.
@@ -166,6 +169,7 @@ export function createSessionRoutes(): Router {
           statusSource: dbSession?.status_source ?? undefined,
           attentionReason: dbSession?.attention_reason ?? undefined,
           lastStatusChange: dbSession?.last_status_change ?? undefined,
+          description: dbSession?.description ?? undefined,
         });
       }
 
@@ -188,6 +192,7 @@ export function createSessionRoutes(): Router {
       createdAt: session.created_at,
       lastEvent: session.last_event ?? undefined,
       archivedAt: session.archived_at ?? undefined,
+      description: session.description ?? undefined,
     }));
 
     res.json(sessions);
@@ -218,9 +223,62 @@ export function createSessionRoutes(): Router {
       statusSource: dbSession.status_source ?? undefined,
       attentionReason: dbSession.attention_reason ?? undefined,
       lastStatusChange: dbSession.last_status_change ?? undefined,
+      description: dbSession.description ?? undefined,
     };
 
     res.json(sessionInfo);
+  });
+
+  // Set or clear a session's human-readable description
+  router.patch('/:sessionName', (req, res) => {
+    const { sessionName } = req.params;
+
+    if (!/^[\w-]+$/.test(sessionName)) {
+      return res.status(400).json({ error: 'Invalid session name' });
+    }
+
+    // View isolation: don't let a user edit a session they can't see.
+    const viewer = parseViewer(req);
+    const existing = sessionsDb.getSession(sessionName);
+    if (!existing) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    if (!sessionsDb.isSessionVisible(existing, viewer)) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    const rawDescription = (req.body as { description?: unknown }).description;
+    if (rawDescription !== null && typeof rawDescription !== 'string') {
+      return res.status(400).json({ error: 'description must be a string or null' });
+    }
+
+    // Normalize: trim, cap length, empty string → null (clears the label).
+    let description: string | null = null;
+    if (typeof rawDescription === 'string') {
+      const trimmed = rawDescription.trim().slice(0, MAX_DESCRIPTION_LENGTH);
+      description = trimmed.length > 0 ? trimmed : null;
+    }
+
+    const updated = sessionsDb.setSessionDescription(sessionName, description);
+    if (!updated) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Broadcast so connected dashboards live-refresh the list.
+    broadcastStatusUpdate({
+      name: updated.name,
+      project: updated.project,
+      createdAt: updated.created_at,
+      lastActivity: updated.last_activity,
+      lastEvent: updated.last_event ?? undefined,
+      status: updated.status ?? undefined,
+      statusSource: updated.status_source ?? undefined,
+      attentionReason: updated.attention_reason ?? undefined,
+      lastStatusChange: updated.last_status_change ?? undefined,
+      description: updated.description ?? undefined,
+    });
+
+    res.json({ success: true, description: updated.description });
   });
 
   // Acknowledge session - reset needs_attention status

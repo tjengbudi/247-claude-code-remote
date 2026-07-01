@@ -21,8 +21,8 @@ describe('Database Schema', () => {
       expect(Number.isInteger(SCHEMA_VERSION)).toBe(true);
     });
 
-    it('current version is 20', () => {
-      expect(SCHEMA_VERSION).toBe(20);
+    it('current version is 21', () => {
+      expect(SCHEMA_VERSION).toBe(21);
     });
   });
 
@@ -131,6 +131,8 @@ describe('Database Schema', () => {
       expect(columnNames).toContain('owner_id');
       // Bound sub-path (v20)
       expect(columnNames).toContain('working_dir');
+      // Human-readable label (v21)
+      expect(columnNames).toContain('description');
 
       db.close();
     });
@@ -157,6 +159,8 @@ describe('Database Schema', () => {
           owner_id: 'user-1',
           // Bound working directory (v20)
           working_dir: null,
+          // Human-readable label (v21)
+          description: null,
         };
 
         expect(session.id).toBe(1);

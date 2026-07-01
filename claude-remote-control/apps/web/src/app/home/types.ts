@@ -22,6 +22,8 @@ export interface SelectedSession {
   workingDir?: string;
   /** Classified git context for the bound path — kind, branch, boundPath (Story 6.5) */
   gitCwdContext?: GitCwdContext;
+  /** Human-readable label supplied at create time (v21), sent to the agent on the create WS. */
+  description?: string;
 }
 
 // Re-export StoredAgentConnection from AgentConnectionSettings for convenience

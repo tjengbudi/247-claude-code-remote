@@ -33,6 +33,42 @@ describe('SessionMiniCard', () => {
     });
   });
 
+  describe('description display logic', () => {
+    // Mirrors the title-selection logic in SessionMiniCard:
+    // description wins as the title; technical name drops to a subtitle.
+    function resolve(sessionName: string, description?: string) {
+      const technicalName = sessionName.split('--')[1] || sessionName;
+      return {
+        displayName: description || technicalName,
+        technicalName,
+        hasDescription: Boolean(description),
+      };
+    }
+
+    it('uses the description as the title when present', () => {
+      const r = resolve('project--wise-lynx-83', 'Fix login bug');
+      expect(r.displayName).toBe('Fix login bug');
+      expect(r.hasDescription).toBe(true);
+    });
+
+    it('still exposes the technical name as a subtitle when described', () => {
+      const r = resolve('project--wise-lynx-83', 'Fix login bug');
+      expect(r.technicalName).toBe('wise-lynx-83');
+    });
+
+    it('falls back to the technical name when no description', () => {
+      const r = resolve('project--wise-lynx-83');
+      expect(r.displayName).toBe('wise-lynx-83');
+      expect(r.hasDescription).toBe(false);
+    });
+
+    it('treats an empty-string description as no description', () => {
+      const r = resolve('project--wise-lynx-83', '');
+      expect(r.displayName).toBe('wise-lynx-83');
+      expect(r.hasDescription).toBe(false);
+    });
+  });
+
   describe('active state styling', () => {
     const activeStyles = {
       active: 'bg-white/10 border-orange-500/30 shadow-lg shadow-orange-500/10',

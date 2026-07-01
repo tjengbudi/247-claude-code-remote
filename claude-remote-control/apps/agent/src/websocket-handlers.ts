@@ -22,6 +22,9 @@ import type {
 import { getAgentVersion, needsUpdate } from './version.js';
 import { triggerUpdate, isUpdateInProgress } from './updater.js';
 
+// Max stored length for a session description (chars). Mirrors the HTTP route cap.
+const MAX_DESCRIPTION_LENGTH = 200;
+
 // Connection tracking
 const activeConnections = new Map<string, Set<WebSocket>>();
 // Sessions subscribers, each tagged with the viewer identity parsed from the
@@ -196,6 +199,11 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
   const ownerId = url.searchParams.get('owner') || null;
   // Bound sub-path: absolute path to worktree or subfolder (Story 6.5 FR8)
   const workingDir = url.searchParams.get('workingDir');
+  // Optional human-readable label supplied at create time (v21). Trimmed/capped.
+  const rawDescription = url.searchParams.get('description');
+  const description = rawDescription
+    ? rawDescription.trim().slice(0, MAX_DESCRIPTION_LENGTH) || null
+    : null;
   const sessionName = urlSessionName || generateSessionName(project || 'root');
 
   // Validate project (empty string is allowed for "terminal at root")
@@ -361,6 +369,7 @@ export function handleTerminalConnection(ws: WebSocket, url: URL): void {
           lastActivity: now,
           ownerId,
           workingDir: workingDirToPersist,
+          description,
         });
       } catch (err) {
         console.error(`Failed to persist session '${sessionName}':`, err);

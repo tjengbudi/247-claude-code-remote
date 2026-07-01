@@ -26,7 +26,12 @@ interface NewSessionModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   machines: Machine[];
-  onStartSession: (machineId: string, project: string, environmentId?: string) => void;
+  onStartSession: (
+    machineId: string,
+    project: string,
+    environmentId?: string,
+    description?: string
+  ) => void;
 }
 
 export function NewSessionModal({
@@ -37,6 +42,7 @@ export function NewSessionModal({
 }: NewSessionModalProps) {
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('existing');
+  const [description, setDescription] = useState('');
 
   // Custom hooks
   const { folders, selectedProject, setSelectedProject, loadingFolders, addFolder } =
@@ -48,6 +54,7 @@ export function NewSessionModal({
     if (!open) {
       setSelectedMachine(null);
       setActiveTab('existing');
+      setDescription('');
       clearError();
     }
   }, [open, clearError]);
@@ -56,10 +63,10 @@ export function NewSessionModal({
     if (selectedMachine && selectedProject) {
       // Pass empty string for root, otherwise pass the project name
       const project = selectedProject === TERMINAL_AT_ROOT ? '' : selectedProject;
-      onStartSession(selectedMachine.id, project);
+      onStartSession(selectedMachine.id, project, undefined, description.trim() || undefined);
       onOpenChange(false);
     }
-  }, [selectedMachine, selectedProject, onStartSession, onOpenChange]);
+  }, [selectedMachine, selectedProject, description, onStartSession, onOpenChange]);
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback(
@@ -87,7 +94,7 @@ export function NewSessionModal({
     if (result.success && result.project && selectedMachine) {
       // Add the new folder to the list and start session
       addFolder(result.project);
-      onStartSession(selectedMachine.id, result.project);
+      onStartSession(selectedMachine.id, result.project, undefined, description.trim() || undefined);
       onOpenChange(false);
     }
     return result;
@@ -171,6 +178,28 @@ export function NewSessionModal({
                   ) : (
                     <CloneRepoTab onClone={handleClone} loading={cloning} error={cloneError} />
                   )}
+
+                  {/* Optional human-readable description for the session */}
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="new-session-description"
+                      className="text-sm font-medium text-white/70"
+                    >
+                      Description <span className="text-white/30">(optional)</span>
+                    </label>
+                    <input
+                      id="new-session-description"
+                      type="text"
+                      value={description}
+                      maxLength={200}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="e.g. Fix login bug"
+                      className={cn(
+                        'w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white',
+                        'placeholder:text-white/30 focus:border-orange-500/50 focus:outline-none'
+                      )}
+                    />
+                  </div>
                 </motion.div>
               )}
             </div>

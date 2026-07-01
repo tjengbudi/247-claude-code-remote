@@ -32,8 +32,8 @@ describe('Database Migration v20 - working_dir column', () => {
     }
   });
 
-  it('should have schema version 20', () => {
-    expect(SCHEMA_VERSION).toBe(20);
+  it('should have a schema version at or beyond 20', () => {
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(20);
   });
 
   it('should add working_dir column to sessions table', () => {
@@ -152,9 +152,9 @@ describe('Database Migration v20 - working_dir column', () => {
     // Now run migration
     db = initDatabase(dbPath);
 
-    // Verify schema version
+    // Verify schema version (migrates through to the latest)
     const version = db.prepare('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1').get();
-    expect((version as any).version).toBe(20);
+    expect((version as any).version).toBe(SCHEMA_VERSION);
 
     // Verify working_dir column exists
     const columns = db.prepare(`

@@ -37,6 +37,8 @@ interface TerminalProps {
   workingDir?: string;
   /** Classified git context for bound path — kind, branch, boundPath (Story 6.5) */
   gitCwdContext?: GitCwdContext;
+  /** Human-readable label supplied at create time (v21), sent as a WS query param. */
+  description?: string;
 }
 
 export function Terminal({
@@ -55,6 +57,7 @@ export function Terminal({
   costUsd,
   workingDir,
   gitCwdContext,
+  description,
 }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
@@ -99,6 +102,7 @@ export function Terminal({
     isMobile,
     owner,
     workingDir,
+    description,
   });
 
   // Handle paste from clipboard (mobile header button).
