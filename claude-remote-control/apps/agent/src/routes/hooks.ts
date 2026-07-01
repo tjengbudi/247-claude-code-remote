@@ -14,8 +14,6 @@ import * as sessionsDb from '../db/sessions.js';
 import { broadcastStatusUpdate } from '../websocket-handlers.js';
 import { loadConfig } from '../config.js';
 
-const WEB_PUSH_URL = 'https://247.quivr.com/api/push/notify';
-
 /**
  * Send push notification to web API
  */
@@ -29,7 +27,14 @@ async function sendPushNotification(sessionName: string): Promise<void> {
       return;
     }
 
-    const response = await fetch(WEB_PUSH_URL, {
+    const baseUrl = config.dashboard?.apiUrl?.replace(/\/api\/?$/, '') ?? null;
+    if (!baseUrl) {
+      console.log('[Hooks] No dashboard.apiUrl configured, skipping push');
+      return;
+    }
+    const webPushUrl = `${baseUrl}/api/push/notify`;
+
+    const response = await fetch(webPushUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ machineId, sessionName }),

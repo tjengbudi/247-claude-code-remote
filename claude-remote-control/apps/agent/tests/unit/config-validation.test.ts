@@ -327,7 +327,7 @@ describe('Config Schema Documentation', () => {
         whitelist: [],
       },
       dashboard: {
-        apiUrl: 'https://247.quivr.com/api',
+        apiUrl: 'http://192.168.1.100:3001/api',
         apiKey: 'your-api-key',
       },
     };
@@ -350,7 +350,7 @@ describe('Config Schema Documentation', () => {
         whitelist: ['project-a', 'project-b'],
       },
       dashboard: {
-        apiUrl: 'https://247.quivr.com/api',
+        apiUrl: 'http://192.168.1.100:3001/api',
         apiKey: 'your-api-key',
       },
     };

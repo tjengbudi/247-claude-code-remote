@@ -24,12 +24,12 @@ export const metadata: Metadata = {
   title: '247 - The Vibe Company',
   description: '247 - Web terminal access to Claude Code from anywhere',
   applicationName: '247',
-  metadataBase: new URL('https://247.quivr.com'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'),
   openGraph: {
     title: '247 - The Vibe Company',
     description:
       'Web terminal access to Claude Code from anywhere. Control your AI coding sessions remotely.',
-    url: 'https://247.quivr.com',
+    url: process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001',
     siteName: '247',
     locale: 'en_US',
     type: 'website',

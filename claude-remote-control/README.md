@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://247.quivr.com/logo.svg" alt="247 Logo" width="120" />
+  <img src="http://localhost:3001/logo.svg" alt="247 Logo" width="120" />
 </p>
 
 <h1 align="center">247</h1>
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://247.quivr.com">Website</a> ·
+  <a href="http://localhost:3001">Website</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="https://github.com/QuivrHQ/247/issues">Report Bug</a>
 </p>
@@ -38,7 +38,7 @@ Sessions persist forever with tmux. Disconnect and reconnect anytime. Your AI ke
 npm install -g 247-cli
 247 init
 247 start
-open https://247.quivr.com
+open http://localhost:3001
 ```
 
 ## Why 247?
@@ -88,7 +88,7 @@ open https://247.quivr.com
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Your Phone/Browser                       │
-│                        https://247.quivr.com                     │
+│                        http://localhost:3001                     │
 └─────────────────────────────────────────────────────────────────┘
                                    │
                                    │ HTTPS/WebSocket
@@ -116,7 +116,7 @@ open https://247.quivr.com
 ---
 
 <p align="center">
-  MIT License · Built by <a href="https://quivr.com">Quivr</a> (YC W24)
+  MIT License
 </p>
 
 ### Bugs

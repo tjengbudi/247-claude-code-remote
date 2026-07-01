@@ -81,7 +81,7 @@ npm install -g 247-cli
 ```
                     ┌─────────────────────────────────────┐
                     │        Your Phone / Tablet          │
-                    │         247.quivr.com               │
+                    │      http://<your-ip>:3001          │
                     └──────────────┬──────────────────────┘
                                    │ HTTPS
                     ┌──────────────▼──────────────────────┐
@@ -206,11 +206,10 @@ MIT License - see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <b>Built by <a href="https://quivr.com">Quivr</a></b> (Y Combinator W24)
+  <b>Self-hosted via Docker</b>
 </p>
 
 <p align="center">
-  <a href="https://247.quivr.com">Website</a> •
-  <a href="https://github.com/QuivrHQ/247/issues">Issues</a> •
-  <a href="https://twitter.com/quaborr">Twitter</a>
+  <a href="https://github.com/tjengbudi/247-claude-code-remote">GitHub</a> •
+  <a href="https://github.com/tjengbudi/247-claude-code-remote/issues">Issues</a>
 </p>

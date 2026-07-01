@@ -335,11 +335,9 @@ Kombinasi mitigasi ini memberikan perlindungan memadai untuk postur Track 2 tanp
 }
 ```
 
-**JANGAN** biarkan `config.dashboard.apiUrl` menggunakan default `https://247.quivr.com` (fallback di `pair.ts:89-96`). Jika dibiarkan default, bearer token host-shell akan ditempatkan di URL yang mengarah ke domain cloud, mengekspos kredensial sensitif ke internet.
-
 **Cara kerja `getDashboardUrl()`:**
 - Jika `config.dashboard.apiUrl` diset → gunakan nilai tersebut (hapus suffix `/api`)
-- Jika tidak diset → fallback ke `https://247.quivr.com` (BAHAYA untuk self-host)
+- Jika tidak diset → fallback ke `http://<local-ip>:3001` (IP LAN mesin yang menjalankan Docker)
 
 Pastikan nilai yang Anda set menunjuk ke dashboard lokal/LAN Anda, bukan domain publik.
 

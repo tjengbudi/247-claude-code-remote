@@ -4,12 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-247 (Quivr) - A system for web terminal access to Claude Code from anywhere. Consists of a Next.js dashboard (Vercel), local Node.js agents (one per Mac) with SQLite for local persistence, and Tailscale Tunnels for secure exposure..
+247 - A system for web terminal access to Claude Code from anywhere. Consists of a Next.js dashboard (Docker), local Node.js agents (one per machine) with SQLite for local persistence.
 
-**Domain:** 247.quivr.com
+**Deployment:** Docker (`docker-compose.yml`) — web app runs on port 3001. Set `NEXT_PUBLIC_APP_URL` env var to the host machine's IP (e.g. `http://192.168.1.x:3001`).
 
 - To create a release of this project, use the `pnpm release` command from the main worktree only (not session worktrees). This ensures proper versioning and tagging.
-- Never deploy with vercel CLI, always use the release process to ensure consistency.
 - The web app is stateless and uses localStorage for agent URL persistence. All session data is stored locally by the agent using SQLite.
 - The `pnpm release` command automates semantic versioning based on conventional commits
 - Always add tests for new features and changes. Run `pnpm test` before committing.

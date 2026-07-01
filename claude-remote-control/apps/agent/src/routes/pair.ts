@@ -264,12 +264,14 @@ export async function registerCodeWithDashboard(params: {
 
 // Get dashboard URL
 function getDashboardUrl(): string {
-  // Use config if available, otherwise default to production
+  // Use config if available
   if (config.dashboard?.apiUrl) {
     // Extract base URL from API URL (remove /api suffix)
     return config.dashboard.apiUrl.replace(/\/api\/?$/, '');
   }
-  return 'https://247.quivr.com';
+  // Fall back to local IP on default Docker port
+  const localIp = getLocalNetworkIp();
+  return localIp ? `http://${localIp}:3001` : 'http://localhost:3001';
 }
 
 // Generate QR code as SVG using a simple implementation

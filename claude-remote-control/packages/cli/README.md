@@ -2,7 +2,7 @@
 
 **Access Claude Code from anywhere, 24/7.**
 
-A CLI tool by [Quivr](https://247.quivr.com) that lets you run Claude Code remotely and access it from any device via a web dashboard.
+A CLI tool that lets you run Claude Code remotely and access it from any device via a self-hosted web dashboard (Docker).
 
 ## Installation
 
@@ -114,8 +114,8 @@ If `~/.codex/config.toml` exists, `247 hooks install` will try to add this line 
 
 ## Links
 
-- **Dashboard:** https://247.quivr.com
-- **GitHub:** https://github.com/QuivrHQ/247
+- **Dashboard:** runs locally via Docker on port 3001 (`http://<your-ip>:3001`)
+- **GitHub:** https://github.com/tjengbudi/247-claude-code-remote
 
 ## License
 
