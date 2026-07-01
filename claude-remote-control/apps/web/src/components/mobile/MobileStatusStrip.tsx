@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, Plus, Search, Settings, Monitor } from 'lucide-react';
+import { ChevronDown, Plus, Search, Settings, Monitor, GitBranch, ListTodo } from 'lucide-react';
 import { PushNotificationButton } from '@/components/PushNotificationButton';
 import { cn } from '@/lib/utils';
 import { SessionMiniCard } from './SessionMiniCard';
@@ -44,6 +44,10 @@ export interface MobileStatusStripProps {
   projectFilter?: string | null;
   /** Callback to select/deselect project filter */
   onSelectProject?: (projectName: string | null) => void;
+  /** Open Git panel */
+  onOpenGit?: () => void;
+  /** Open Tasks panel */
+  onOpenTasks?: () => void;
 }
 
 export function MobileStatusStrip({
@@ -61,6 +65,8 @@ export function MobileStatusStrip({
   projects = [],
   projectFilter,
   onSelectProject,
+  onOpenGit,
+  onOpenTasks,
 }: MobileStatusStripProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [search, setSearch] = useState('');
@@ -236,6 +242,24 @@ export function MobileStatusStrip({
 
           {/* Utility buttons */}
           <div className="flex items-center gap-0.5">
+            {onOpenTasks && (
+              <button
+                onClick={onOpenTasks}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-white/30 transition-colors hover:bg-white/5 hover:text-white/60"
+                aria-label="Tasks"
+              >
+                <ListTodo className="h-4 w-4" />
+              </button>
+            )}
+            {onOpenGit && (
+              <button
+                onClick={onOpenGit}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-white/30 transition-colors hover:bg-white/5 hover:text-white/60"
+                aria-label="Git"
+              >
+                <GitBranch className="h-4 w-4" />
+              </button>
+            )}
             {onConnectionSettingsClick && (
               <button
                 onClick={onConnectionSettingsClick}

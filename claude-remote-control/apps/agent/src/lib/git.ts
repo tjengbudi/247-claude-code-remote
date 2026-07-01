@@ -757,18 +757,21 @@ export async function getRepoStatus(repoPath: string): Promise<{
 
   const parsed = parseStatusPorcelain(result.stdout);
 
-  // Compute counts from file list
-  const conflicted = parsed.files.filter(f => f.indexStatus === 'unmerged' || f.worktreeStatus === 'unmerged').length;
-  const stagedCount = parsed.files.filter(f => f.staged).length;
-  const unstagedCount = parsed.files.filter(f => f.worktreeStatus && f.worktreeStatus !== 'untracked' && f.worktreeStatus !== 'ignored' && f.worktreeStatus !== 'unmerged').length;
+  // Filter out the .247-worktrees/ sibling directory — it lives outside tracked
+  // paths by design and would always appear as an untracked noise entry.
+  const files = parsed.files.filter(f => !f.path.startsWith('.247-worktrees/') && f.path !== '.247-worktrees');
 
+  // Compute counts from file list
+  const conflicted = files.filter(f => f.indexStatus === 'unmerged' || f.worktreeStatus === 'unmerged').length;
+  const stagedCount = files.filter(f => f.staged).length;
+  const unstagedCount = files.filter(f => f.worktreeStatus && f.worktreeStatus !== 'untracked' && f.worktreeStatus !== 'ignored' && f.worktreeStatus !== 'unmerged').length;
   return {
     branch: parsed.branch,
-    files: parsed.files,
+    files,
     conflicted,
     stagedCount,
     unstagedCount,
-    untrackedCount: parsed.untrackedCount,
+    untrackedCount: files.filter(f => f.worktreeStatus === 'untracked').length,
     ignoredCount: parsed.ignoredCount,
   };
 }

@@ -25,7 +25,7 @@ import { useSessionActions } from '@/hooks/useSessionActions';
 import { useTaskActions } from '@/hooks/useTaskActions';
 import { useGitActions } from '@/hooks/useGitActions';
 import { GitPanel } from '@/components/GitPanel';
-import type { GitCommit } from '247-shared';
+import type { GitCommit, GitWorktree } from '247-shared';
 import { TaskPanel, type AllocatableSession } from '@/components/TaskPanel';
 import { useAuth } from '@/lib/auth/client';
 import { NotificationSettingsPanel } from '@/components/NotificationSettingsPanel';
@@ -140,7 +140,7 @@ export function HomeContent() {
   const { createTask, updateTask, deleteTask } = useTaskActions(agentConnections, taskViewer);
 
   // Git actions hook for history operations
-  const { fetchStatus, fetchLog, fetchCommit, fetchDiff, fetchGraph } = useGitActions(agentConnections, taskViewer);
+  const { fetchStatus, fetchLog, fetchCommit, fetchDiff, fetchGraph, stageFiles, unstageFiles, commitChanges, pushChanges, pullChanges, switchBranch, createWorktree, removeWorktree } = useGitActions(agentConnections, taskViewer);
 
   // Register sound notification callback for needs_attention status changes
   useEffect(() => {
@@ -162,9 +162,12 @@ export function HomeContent() {
   const [gitGraphCapped, setGitGraphCapped] = useState(false);
   const [gitLoading, setGitLoading] = useState(false);
   const [gitGraphLoading, setGitGraphLoading] = useState(false);
+  const [gitStatusLoading, setGitStatusLoading] = useState(false);
   const [gitPage, setGitPage] = useState(0);
   const [gitHasMore, setGitHasMore] = useState(false);
   const GIT_PAGE_SIZE = 50;
+  // repoPath → linked worktrees (refreshed after create/remove/refresh)
+  const [gitWorktreesMap, setGitWorktreesMap] = useState<Record<string, GitWorktree[]>>({});
 
   // Slide-over panel states
   const [guideOpen, setGuideOpen] = useState(false);
@@ -383,28 +386,180 @@ export function HomeContent() {
     }
   }, [gitGraphCommits, taskScope.machineId, selectedGitRepo, handleFetchGraph]);
 
+  const handleRefreshGit = useCallback(async () => {
+    const machineId = taskScope.machineId;
+    if (!machineId || !taskScope.project) return;
+    const worktrees = await fetchStatus(machineId, taskScope.project);
+    setGitWorktreesMap(worktrees);
+    const repo = selectedGitRepo ?? (() => {
+      const gitRepos = getGitStatusForProject(machineId, taskScope.project!);
+      return gitRepos.size > 0 ? Array.from(gitRepos.keys())[0] : null;
+    })();
+    if (repo) {
+      if (!selectedGitRepo) setSelectedGitRepo(repo);
+      setGitGraphCommits(null);
+      setGitGraphCapped(false);
+      await handleFetchGitLog(machineId, repo);
+    }
+  }, [taskScope.machineId, taskScope.project, selectedGitRepo, fetchStatus, handleFetchGitLog, getGitStatusForProject]);
+
+  const handleStage = useCallback(
+    async (repo: string, pathspecs: string[], all?: boolean) => {
+      const machineId = taskScope.machineId;
+      if (!machineId) return false;
+      const ok = await stageFiles(machineId, repo, pathspecs, all);
+      if (ok && taskScope.project) fetchStatus(machineId, taskScope.project);
+      return ok;
+    },
+    [taskScope.machineId, taskScope.project, stageFiles, fetchStatus]
+  );
+
+  const handleUnstage = useCallback(
+    async (repo: string, pathspecs: string[], all?: boolean) => {
+      const machineId = taskScope.machineId;
+      if (!machineId) return false;
+      const ok = await unstageFiles(machineId, repo, pathspecs, all);
+      if (ok && taskScope.project) fetchStatus(machineId, taskScope.project);
+      return ok;
+    },
+    [taskScope.machineId, taskScope.project, unstageFiles, fetchStatus]
+  );
+
+  const handleCommit = useCallback(
+    async (repo: string, message: string) => {
+      const machineId = taskScope.machineId;
+      if (!machineId) return false;
+      const ok = await commitChanges(machineId, repo, message);
+      if (ok) {
+        if (taskScope.project) fetchStatus(machineId, taskScope.project);
+        await handleFetchGitLog(machineId, repo);
+      }
+      return ok;
+    },
+    [taskScope.machineId, taskScope.project, commitChanges, fetchStatus, handleFetchGitLog]
+  );
+
+  const handlePush = useCallback(
+    async (repo: string) => {
+      const machineId = taskScope.machineId;
+      if (!machineId) return false;
+      const ok = await pushChanges(machineId, repo);
+      if (ok && taskScope.project) fetchStatus(machineId, taskScope.project);
+      return ok;
+    },
+    [taskScope.machineId, taskScope.project, pushChanges, fetchStatus]
+  );
+
+  const handlePull = useCallback(
+    async (repo: string) => {
+      const machineId = taskScope.machineId;
+      if (!machineId) return false;
+      const ok = await pullChanges(machineId, repo);
+      if (ok && taskScope.project) fetchStatus(machineId, taskScope.project);
+      return ok;
+    },
+    [taskScope.machineId, taskScope.project, pullChanges, fetchStatus]
+  );
+
+  const handleSwitchBranch = useCallback(
+    async (repo: string, name: string, create?: boolean) => {
+      const machineId = taskScope.machineId;
+      if (!machineId) return false;
+      const ok = await switchBranch(machineId, repo, name, create);
+      if (ok && taskScope.project) fetchStatus(machineId, taskScope.project);
+      return ok;
+    },
+    [taskScope.machineId, taskScope.project, switchBranch, fetchStatus]
+  );
+
+  const handleCreateWorktree = useCallback(
+    async (repo: string, branch: string, newBranch?: boolean) => {
+      const machineId = taskScope.machineId;
+      if (!machineId) return null;
+      const result = await createWorktree(machineId, repo, branch, newBranch);
+      if (result && taskScope.project) {
+        const worktrees = await fetchStatus(machineId, taskScope.project);
+        setGitWorktreesMap(worktrees);
+      }
+      return result;
+    },
+    [taskScope.machineId, taskScope.project, createWorktree, fetchStatus]
+  );
+
+  const handleRemoveWorktree = useCallback(
+    async (repo: string, path: string, opts?: { force?: boolean }) => {
+      const machineId = taskScope.machineId;
+      if (!machineId) return { ok: false };
+      const result = await removeWorktree(machineId, repo, path, opts);
+      if (result.ok && taskScope.project) {
+        const worktrees = await fetchStatus(machineId, taskScope.project);
+        setGitWorktreesMap(worktrees);
+      }
+      return result;
+    },
+    [taskScope.machineId, taskScope.project, removeWorktree, fetchStatus]
+  );
+
   // Refetch the log and reset all history state whenever the selected repo
   // changes (or the panel opens). Without this, switching repos left the
   // previous repo's commit list visible and clicking a commit fetched it
   // against the wrong repo. This effect owns log fetching; handleOpenGit only
   // opens the panel and auto-selects the first repo.
+  // Clear history when panel closes so next open always shows spinner first
   useEffect(() => {
+    if (!gitOpen) {
+      setGitCommits([]);
+      setGitGraphCommits(null);
+      setGitGraphCapped(false);
+      setGitPage(0);
+      setGitHasMore(false);
+    }
+  }, [gitOpen]);
+
+  // Fetch log when panel opens or selected repo changes
+  useEffect(() => {
+    if (!gitOpen) return;
     setGitGraphCommits(null);
     setGitGraphCapped(false);
     setGitCommits([]);
     setGitPage(0);
     setGitHasMore(false);
-    if (!gitOpen) return;
     const machineId = taskScope.machineId;
     if (machineId && selectedGitRepo) {
+      setGitLoading(true);
       void handleFetchGitLog(machineId, selectedGitRepo);
     }
   }, [selectedGitRepo, gitOpen, taskScope.machineId, handleFetchGitLog]);
 
+  // Reset all git state when project changes to prevent history cross-contamination
+  useEffect(() => {
+    setSelectedGitRepo(null);
+    setGitCommits([]);
+    setGitGraphCommits(null);
+    setGitGraphCapped(false);
+    setGitPage(0);
+    setGitHasMore(false);
+    setGitWorktreesMap({});
+  }, [taskScope.project]);
+
+  // Auto-select first repo when panel is open but repos arrive late via WS
+  useEffect(() => {
+    if (!gitOpen || selectedGitRepo || !taskScope.machineId || !taskScope.project) return;
+    const gitRepos = getGitStatusForProject(taskScope.machineId, taskScope.project);
+    const firstRepoPath = gitRepos.size > 0 ? Array.from(gitRepos.keys())[0] : null;
+    if (firstRepoPath) {
+      setSelectedGitRepo(firstRepoPath);
+    }
+  }, [gitOpen, selectedGitRepo, taskScope.machineId, taskScope.project, getGitStatusForProject]);
+
   const handleOpenGit = useCallback(() => {
     setGitOpen(true);
     if (taskScope.machineId && taskScope.project) {
-      fetchStatus(taskScope.machineId, taskScope.project);
+      setGitStatusLoading(true);
+      fetchStatus(taskScope.machineId, taskScope.project).then((worktrees) => {
+        setGitWorktreesMap(worktrees);
+        setGitStatusLoading(false);
+      }).catch(() => setGitStatusLoading(false));
       const gitRepos = getGitStatusForProject(taskScope.machineId, taskScope.project);
       const firstRepoPath = gitRepos.size > 0 ? Array.from(gitRepos.keys())[0] : null;
       if (firstRepoPath && !selectedGitRepo) {
@@ -615,6 +770,7 @@ export function HomeContent() {
               repoPath,
               isWorktree: false,
               status,
+              worktrees: gitWorktreesMap[repoPath],
             }));
 
             return (
@@ -627,6 +783,7 @@ export function HomeContent() {
                 graphCapped={gitGraphCapped}
                 loadingHistory={gitLoading}
                 graphLoading={gitGraphLoading}
+                statusLoading={gitStatusLoading}
                 wsConnected={isWsConnected(scopeMachineId)}
                 onSelectRepo={setSelectedGitRepo}
                 onLoadMore={gitHasMore && selectedGitRepo
@@ -635,6 +792,15 @@ export function HomeContent() {
                 onToggleGraph={handleToggleGraph}
                 onFetchCommit={handleFetchCommit}
                 onFetchDiff={handleFetchDiff}
+                onRefresh={handleRefreshGit}
+                onStage={handleStage}
+                onUnstage={handleUnstage}
+                onCommit={handleCommit}
+                onPush={handlePush}
+                onPull={handlePull}
+                onSwitchBranch={handleSwitchBranch}
+                onCreateWorktree={handleCreateWorktree}
+                onRemoveWorktree={handleRemoveWorktree}
               />
             );
           })()
@@ -799,6 +965,11 @@ export function HomeContent() {
         projects={sidebarProjects.map((p) => p.name)}
         projectFilter={projectFilter}
         onSelectProject={(name) => setProjectFilter(name)}
+        onOpenGit={handleOpenGit}
+        onOpenTasks={() => {
+          if (taskScope.machineId) refreshTasks(taskScope.machineId);
+          setTasksOpen(true);
+        }}
       />
 
       {/* Main Content Area */}

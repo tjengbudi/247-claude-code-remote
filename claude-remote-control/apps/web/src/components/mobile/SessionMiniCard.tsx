@@ -66,14 +66,17 @@ export function SessionMiniCard({
 
   return (
     <>
-      <motion.button
+      <motion.div
         onClick={onClick}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+        role="button"
+        tabIndex={0}
         whileTap={{ scale: 0.97 }}
         data-testid="session-mini-card"
         data-active={isActive}
         className={cn(
           'relative w-full rounded-xl p-3 text-left transition-all',
-          'min-h-[72px] touch-manipulation border',
+          'min-h-[72px] touch-manipulation border cursor-pointer',
           isActive
             ? 'border-orange-500/30 bg-white/10 shadow-lg shadow-orange-500/10'
             : 'border-white/5 bg-white/5 hover:border-white/10 hover:bg-white/10'
@@ -156,7 +159,7 @@ export function SessionMiniCard({
             data-testid="active-indicator"
           />
         )}
-      </motion.button>
+      </motion.div>
 
       <ConfirmDialog
         open={showKillConfirm}

@@ -13,7 +13,7 @@ export interface GitViewer {
 }
 
 interface UseGitActionsReturn {
-  fetchStatus: (machineId: string, project: string) => Promise<void>;
+  fetchStatus: (machineId: string, project: string) => Promise<Record<string, import('247-shared').GitWorktree[]>>;
   fetchLog: (
     machineId: string,
     repo: string,
@@ -106,17 +106,25 @@ export function useGitActions(
   );
 
   const fetchStatus = useCallback(
-    async (machineId: string, project: string): Promise<void> => {
+    async (machineId: string, project: string): Promise<Record<string, import('247-shared').GitWorktree[]>> => {
       const machine = findMachine(machineId);
-      if (!machine) return;
+      if (!machine) return {};
       try {
         const url = buildApiUrl(
           machine.url,
           `/api/git/status?project=${encodeURIComponent(project)}`
         );
-        await fetch(url);
+        const res = await fetch(url);
+        if (!res.ok) return {};
+        const data = await res.json() as { repos?: Array<{ repoPath: string; worktrees?: import('247-shared').GitWorktree[] }> };
+        const result: Record<string, import('247-shared').GitWorktree[]> = {};
+        for (const repo of data.repos ?? []) {
+          result[repo.repoPath] = repo.worktrees ?? [];
+        }
+        return result;
       } catch (_err) {
         // silent — status is best-effort; WS push fills the panel
+        return {};
       }
     },
     [findMachine]

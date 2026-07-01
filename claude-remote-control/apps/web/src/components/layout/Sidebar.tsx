@@ -92,13 +92,16 @@ function Section({ title, children, collapsed, defaultExpanded = true, action }:
   return (
     <div className="py-1">
       {/* Section Header */}
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); } }}
         className={cn(
           'flex w-full items-center justify-between',
           'px-3 py-2 text-xs font-semibold uppercase tracking-wider',
           'text-foreground-subtle hover:text-foreground-muted',
-          'transition-colors duration-150'
+          'cursor-pointer transition-colors duration-150'
         )}
       >
         <div className="flex items-center gap-1.5">
@@ -108,7 +111,7 @@ function Section({ title, children, collapsed, defaultExpanded = true, action }:
           <span>{title}</span>
         </div>
         {action}
-      </button>
+      </div>
 
       {/* Section Content */}
       <AnimatePresence>

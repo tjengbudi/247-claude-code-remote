@@ -113,17 +113,23 @@ export function createGitRoutes(): Router {
       // Discover all git repos under the project directory
       const discovery = await discoverRepos({ cwd: projectCwd });
 
-      // Fetch status for each repo
+      // Fetch status + worktrees for each repo
+      const root = canonicalPath(allowedRoot());
       const repos = await Promise.all(
         discovery.repos.map(async (repo) => {
           try {
-            const status = await getRepoStatus(repo.path);
+            const [status, worktreeList] = await Promise.all([
+              getRepoStatus(repo.path),
+              listWorktrees(repo.path).catch(() => []),
+            ]);
             broadcastGitStatus(project, repo.path, status);
+            const worktrees = worktreeList.map((wt) => ({ ...wt, path: relative(root, canonicalPath(wt.path)) }));
             return {
               repoPath: repo.path,
               isWorktree: !repo.topLevel,
               mainWorktree: repo.worktreeInfo?.mainWorktree,
               status,
+              worktrees,
             };
           } catch (_err) {
             // If a repo's status fails, include it with a safe error (AC4: never leak

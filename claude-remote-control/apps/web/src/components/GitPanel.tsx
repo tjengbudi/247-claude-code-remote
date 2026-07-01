@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check, FolderOpen, Trash2, GitFork, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, GitBranch, AlertCircle, FolderGit, History, Plus, Minus, Upload, Download, Check, FolderOpen, Trash2, GitFork, Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GitRepoStatus, GitFileInfo, GitCommit, GitCommitWithDiff, GitWorktree } from '247-shared';
 import { GitHistory } from './GitHistory';
@@ -40,8 +40,11 @@ interface GitPanelProps {
   // Worktree actions (Story 6.6)
   onCreateWorktree?: (repo: string, branch: string, newBranch?: boolean) => Promise<{ path: string; branch: string } | null>;
   onRemoveWorktree?: (repo: string, path: string, opts?: { force?: boolean }) => Promise<{ ok: boolean; dirty?: boolean; liveSession?: boolean }>;
+  onRefresh?: () => Promise<void>;
   /** When false and repos is empty, show "Connecting…" instead of "No repos found" */
   wsConnected?: boolean;
+  /** True while initial fetchStatus is in-flight — show spinner instead of empty state */
+  statusLoading?: boolean;
 }
 
 type TabView = 'status' | 'history';
@@ -600,16 +603,21 @@ export function GitPanel({
   onSwitchBranch,
   onCreateWorktree,
   onRemoveWorktree,
+  onRefresh,
   wsConnected = true,
+  statusLoading = false,
 }: GitPanelProps) {
   const [activeTab, setActiveTab] = useState<TabView>('status');
+  const [refreshing, setRefreshing] = useState(false);
 
   if (repos.length === 0) {
-    if (!wsConnected) {
+    if (!wsConnected || statusLoading) {
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
           <Loader2 className="h-8 w-8 animate-spin text-white/20" />
-          <p className="text-sm text-white/40">Connecting to agent…</p>
+          <p className="text-sm text-white/40">
+            {statusLoading ? 'Loading repositories…' : 'Connecting to agent…'}
+          </p>
         </div>
       );
     }
@@ -642,6 +650,21 @@ export function GitPanel({
           icon={<History className="h-3.5 w-3.5" />}
           label="History"
         />
+
+        {/* Refresh button */}
+        {onRefresh && (
+          <button
+            onClick={async () => {
+              setRefreshing(true);
+              try { await onRefresh(); } finally { setRefreshing(false); }
+            }}
+            disabled={refreshing}
+            className="ml-auto flex items-center gap-1 rounded-lg bg-white/5 px-2 py-1.5 text-xs text-white/60 transition-colors hover:bg-white/10 hover:text-white/80 disabled:opacity-40"
+            title="Refresh"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+          </button>
+        )}
 
         {/* Repo selector when viewing history */}
         {activeTab === 'history' && repos.length > 1 && (
@@ -679,6 +702,11 @@ export function GitPanel({
               onRemoveWorktree={onRemoveWorktree}
             />
           ))}
+        </div>
+      ) : (loadingHistory && commits.length === 0) || !selectedRepo ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
+          <Loader2 className="h-8 w-8 animate-spin text-white/20" />
+          <p className="text-sm text-white/40">Loading history…</p>
         </div>
       ) : (
         <GitHistory
