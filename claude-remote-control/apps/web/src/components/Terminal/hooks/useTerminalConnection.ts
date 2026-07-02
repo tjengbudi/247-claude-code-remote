@@ -43,6 +43,8 @@ interface UseTerminalConnectionProps {
   workingDir?: string;
   /** Human-readable label supplied at create time (v21), sent as a WS query param on create. */
   description?: string;
+  /** True when this terminal is being created fresh (not reconnecting to existing session). */
+  isNewSession?: boolean;
 }
 
 export function useTerminalConnection({
@@ -59,6 +61,7 @@ export function useTerminalConnection({
   token,
   owner,
   description,
+  isNewSession: isNewSessionProp,
 }: UseTerminalConnectionProps) {
   const [connected, setConnected] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -488,9 +491,7 @@ export function useTerminalConnection({
       }
 
       // WebSocket connection
-      // Read create flag from browser URL to determine if this is a new session creation
-      const urlParams = new URLSearchParams(window.location.search);
-      const isNewSession = urlParams.get('create') === 'true';
+      const isNewSession = !!isNewSessionProp;
 
       let wsUrl = buildWebSocketUrl(
         agentUrl,

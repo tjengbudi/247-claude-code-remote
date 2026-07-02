@@ -39,6 +39,8 @@ interface TerminalProps {
   gitCwdContext?: GitCwdContext;
   /** Human-readable label supplied at create time (v21), sent as a WS query param. */
   description?: string;
+  /** True when this terminal is being created fresh (not reconnecting to existing session). */
+  isNewSession?: boolean;
 }
 
 export function Terminal({
@@ -58,6 +60,7 @@ export function Terminal({
   workingDir,
   gitCwdContext,
   description,
+  isNewSession,
 }: TerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
@@ -103,6 +106,7 @@ export function Terminal({
     owner,
     workingDir,
     description,
+    isNewSession,
   });
 
   // Handle paste from clipboard (mobile header button).

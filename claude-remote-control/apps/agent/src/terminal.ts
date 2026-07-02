@@ -100,7 +100,9 @@ export function createTerminal(
       '-c',
       cwd,
       ...(isTestEnv ? ['-e', '_247_SKIP_ANIMATION=1'] : []),
-      `bash --init-file ${initScriptPath}`,
+      'bash',
+      '--init-file',
+      initScriptPath,
     ];
   }
 

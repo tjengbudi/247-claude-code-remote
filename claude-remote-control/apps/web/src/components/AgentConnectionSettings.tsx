@@ -32,6 +32,7 @@ export interface AgentConnection {
   method: 'localhost' | 'tailscale' | 'custom' | 'cloud';
   isCloud?: boolean;
   cloudAgentId?: string;
+  token?: string;
 }
 
 // New type with unique ID for multi-agent support
@@ -404,6 +405,7 @@ export function AgentConnectionSettings({
   // Input state
   const [localhostPort, setLocalhostPort] = useState('4678');
   const [customUrl, setCustomUrl] = useState('');
+  const [apiToken, setApiToken] = useState('');
 
   // Connection testing
   const [testState, setTestState] = useState<TestState>('idle');
@@ -431,6 +433,7 @@ export function AgentConnectionSettings({
         setConnectionType(null);
         setLocalhostPort('4678');
         setCustomUrl('');
+        setApiToken('');
         setTestState('idle');
       }
     }
@@ -495,6 +498,7 @@ export function AgentConnectionSettings({
             ? 'Tailscale Funnel'
             : 'Custom URL',
       method,
+      token: apiToken.trim() || undefined,
     };
 
     setShowSuccess(true);
@@ -879,6 +883,29 @@ export function AgentConnectionSettings({
                         )}
                       />
                     </div>
+
+                    {/* API Token field for custom URLs */}
+                    {remoteMethod === 'custom' && (
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-white/70">
+                          API Token{' '}
+                          <span className="text-white/30 font-normal">(from ~/.247/config.json → dashboard.apiKey)</span>
+                        </label>
+                        <input
+                          type="password"
+                          value={apiToken}
+                          onChange={(e) => setApiToken(e.target.value)}
+                          placeholder="Paste your agent API key..."
+                          className={cn(
+                            'w-full rounded-xl px-4 py-3',
+                            'border border-white/10 bg-white/5',
+                            'text-white placeholder:text-white/30',
+                            'focus:border-orange-500/50 focus:outline-none focus:ring-2 focus:ring-orange-500/20',
+                            'font-mono text-sm'
+                          )}
+                        />
+                      </div>
+                    )}
 
                     {/* Tailscale guide */}
                     {remoteMethod === 'tailscale' && <TailscaleGuide />}

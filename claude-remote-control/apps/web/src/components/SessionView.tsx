@@ -86,6 +86,7 @@ export function SessionView({
       agentToken={agentToken}
       project={project}
       sessionName={isNewSession ? undefined : sessionName}
+      isNewSession={isNewSession}
       environmentId={environmentId}
       planningProjectId={planningProjectId}
       onConnectionChange={setIsConnected}

@@ -103,7 +103,7 @@ export function SessionMiniCard({
     <>
       <motion.div
         onClick={onClick}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+        onKeyDown={(e) => { if (!editing && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(); } }}
         role="button"
         tabIndex={0}
         whileTap={{ scale: 0.97 }}
@@ -120,20 +120,6 @@ export function SessionMiniCard({
         {/* Action buttons */}
         {(onKill || onArchive || onEditDescription) && !editing && (
           <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
-            {onEditDescription && (
-              <button
-                onClick={startEditing}
-                className={cn(
-                  'flex h-7 w-7 items-center justify-center rounded-md',
-                  'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60',
-                  'touch-manipulation transition-all active:scale-90'
-                )}
-                aria-label="Edit description"
-                data-testid="edit-description-button"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
-            )}
             {onArchive && (
               <button
                 onClick={handleArchiveClick}
@@ -162,6 +148,20 @@ export function SessionMiniCard({
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
+            {onEditDescription && (
+              <button
+                onClick={startEditing}
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-md',
+                  'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60',
+                  'touch-manipulation transition-all active:scale-90'
+                )}
+                aria-label="Edit description"
+                data-testid="edit-description-button"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         )}
 
@@ -183,8 +183,8 @@ export function SessionMiniCard({
                   maxLength={200}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
-                    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commitEdit(); }
+                    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
                   }}
                   onBlur={commitEdit}
                   placeholder="Add a description…"

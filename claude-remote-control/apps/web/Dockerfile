@@ -43,9 +43,9 @@ EXPOSE 3001
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3001
 
-# Health check
+# Health check (node:22-slim has no curl; use node instead)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3001/ || exit 1
+    CMD node -e "require('http').get('http://localhost:3001/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"
 
 # Start the standalone Next.js server
 CMD ["node", "apps/web/server.js"]

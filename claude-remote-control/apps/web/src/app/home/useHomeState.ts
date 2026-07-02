@@ -17,6 +17,7 @@ export interface AgentConnection {
   method: 'localhost' | 'tailscale' | 'custom' | 'cloud';
   isCloud?: boolean;
   cloudAgentId?: string;
+  token?: string;
 }
 
 // Type for stored connections (from API)
@@ -215,7 +216,6 @@ export function useHomeState() {
         setSelectedSession((prev) => (prev ? { ...prev, sessionName: actualSessionName } : null));
         const params = new URLSearchParams(searchParams.toString());
         params.set('session', actualSessionName);
-        params.delete('create');
         router.replace(`?${params.toString()}`, { scroll: false });
       }
     },
@@ -250,6 +250,7 @@ export function useHomeState() {
           url: connection.url,
           name: connection.name || 'Agent',
           method: connection.method,
+          token: connection.token,
         });
         // The hook automatically updates the connections state
       } catch (error) {
