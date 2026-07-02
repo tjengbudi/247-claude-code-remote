@@ -11,15 +11,33 @@ services:
     ports:
       - "0.0.0.0:3001:3001"
     volumes:
-      - web-data:/app/data
+      # Bind mount to the host, same as the agent service. Co-locates web.db
+      # next to agent.db in ~/.247/data on the host so `docker compose down -v`
+      # can no longer wipe it (there is no named volume to remove).
+      - /home/budi/.247:/root/.247
     environment:
-      WEB_AUTH_SECRET: ${WEB_AUTH_SECRET:-}
-      WEB_DB_PATH: /app/data/web.db
+      WEB_AUTH_SECRET: KvR50GDgJuuozCTYGQt4wwK8xXRFqKCWeJVkKhrkNP8
+      WEB_DB_PATH: /root/.247/data/web.db
       NODE_ENV: production
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3001}
     restart: unless-stopped
-
-volumes:
-  web-data:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "0.0.0.0:4678:4678"
+    environment:
+      AGENT_TOKEN_ENFORCE: ${AGENT_TOKEN_ENFORCE:-true}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Inside Docker, web service is reachable via service name, not localhost.
+      # AGENT_DASHBOARD_URL overrides dashboard.apiUrl from the mounted config.json.
+      AGENT_DASHBOARD_URL: ${AGENT_DASHBOARD_URL:-http://web:3001}
+      # AGENT_URL is the address browsers use to reach this agent.
+      # Set to the host machine's LAN IP (e.g. http://192.168.1.x:4678).
+      AGENT_URL: ${AGENT_URL:-}
+    volumes:
+      - /home/budi/.247:/root/.247
+      - /home/budi/dev:/root/dev:ro

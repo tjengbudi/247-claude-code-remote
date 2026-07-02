@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
 import { dirname, join, resolve } from 'path';
 import {
   CREATE_TABLES_SQL,
@@ -11,7 +12,9 @@ import {
 import type { DbSchemaVersion } from './schema.js';
 
 // Database file location: ~/.247/data/agent.db
-const DATA_DIR = resolve(process.env.HOME || '~', '.247', 'data');
+// Fall back to homedir() (not literal '~') so the path still resolves under the
+// home directory when HOME is unset, instead of landing in cwd/~/.247/data.
+const DATA_DIR = resolve(process.env.HOME || homedir(), '.247', 'data');
 const DB_PATH = join(DATA_DIR, 'agent.db');
 
 // Singleton database instance
