@@ -9,7 +9,14 @@ RUN apt-get update && apt-get install -y \
     git \
     curl \
     bash \
+    locales \
+    && sed -i '/en_US.UTF-8/s/^# //' /etc/locale.gen \
+    && locale-gen \
     && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8 \
+    LANGUAGE=en_US:en \
+    LC_ALL=en_US.UTF-8
 
 # Install pnpm
 RUN npm install -g pnpm
@@ -17,8 +24,8 @@ RUN npm install -g pnpm
 # Create app directory
 WORKDIR /app
 
-# Copy package files
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+# Copy package files and root config
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.json ./
 COPY apps/agent/package.json ./apps/agent/
 COPY packages/shared/package.json ./packages/shared/
 
@@ -34,6 +41,9 @@ RUN pnpm build
 
 # Create data directory for SQLite
 RUN mkdir -p /root/.247/data
+
+# Allow git to operate on mounted volumes owned by host user (different UID)
+RUN git config --global safe.directory '*'
 
 # Expose port
 EXPOSE 4678

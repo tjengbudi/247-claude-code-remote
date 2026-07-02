@@ -71,7 +71,8 @@ let sessionCounter = 0;
 function generateSessionName(project: string): string {
   const timestamp = Date.now().toString(36);
   const counter = (sessionCounter++).toString(36);
-  return `${project}--${timestamp}${counter}`;
+  const slug = project.replace(/[^\w-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return `${slug || 'root'}--${timestamp}${counter}`;
 }
 
 /**

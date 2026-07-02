@@ -40,7 +40,7 @@ export function createSessionRoutes(): Router {
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
 
-    if (!/^[\w-]+$/.test(sessionName)) {
+    if (!/^[\w\s-]+$/.test(sessionName)) {
       return res.status(400).json({ error: 'Invalid session name' });
     }
 
@@ -95,7 +95,7 @@ export function createSessionRoutes(): Router {
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
 
-    if (!/^[\w-]+$/.test(sessionName)) {
+    if (!/^[\w\s-]+$/.test(sessionName)) {
       return res.status(400).json({ success: false, error: 'Invalid session name' });
     }
 
@@ -202,7 +202,7 @@ export function createSessionRoutes(): Router {
   router.get('/:sessionName/status', (req, res) => {
     const { sessionName } = req.params;
 
-    if (!/^[\w-]+$/.test(sessionName)) {
+    if (!/^[\w\s-]+$/.test(sessionName)) {
       return res.status(400).json({ error: 'Invalid session name' });
     }
 
@@ -233,7 +233,7 @@ export function createSessionRoutes(): Router {
   router.patch('/:sessionName', async (req, res) => {
     const { sessionName } = req.params;
 
-    if (!/^[\w-]+$/.test(sessionName)) {
+    if (!/^[\w\s-]+$/.test(sessionName)) {
       return res.status(400).json({ error: 'Invalid session name' });
     }
 
@@ -302,7 +302,7 @@ export function createSessionRoutes(): Router {
   router.post('/:sessionName/acknowledge', (req, res) => {
     const { sessionName } = req.params;
 
-    if (!/^[\w-]+$/.test(sessionName)) {
+    if (!/^[\w\s-]+$/.test(sessionName)) {
       return res.status(400).json({ error: 'Invalid session name' });
     }
 
@@ -340,7 +340,7 @@ export function createSessionRoutes(): Router {
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
 
-    if (!/^[\w-]+$/.test(sessionName)) {
+    if (!/^[\w\s-]+$/.test(sessionName)) {
       return res.status(400).json({ error: 'Invalid session name' });
     }
 
@@ -370,7 +370,7 @@ export function createSessionRoutes(): Router {
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
 
-    if (!/^[\w-]+$/.test(sessionName)) {
+    if (!/^[\w\s-]+$/.test(sessionName)) {
       return res.status(400).json({ error: 'Invalid session name' });
     }
 
@@ -404,7 +404,7 @@ export function createSessionRoutes(): Router {
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
 
-    if (!/^[\w-]+$/.test(sessionName)) {
+    if (!/^[\w\s-]+$/.test(sessionName)) {
       return res.status(400).json({ error: 'Invalid session name' });
     }
 
